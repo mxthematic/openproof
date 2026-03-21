@@ -10,8 +10,8 @@ use openproof_core::{AppEvent, AppState, AutonomousRunPatch, FocusPane, Submitte
 use openproof_dashboard::{open_browser, start_dashboard_server};
 use openproof_lean::{detect_lean_health, verify_active_node};
 use openproof_model::{
-    load_auth_summary, run_codex_turn, run_codex_turn_streaming, sync_auth_from_codex_cli,
-    CodexTurnRequest, TurnMessage,
+    load_auth_summary, run_codex_turn, run_codex_turn_with_events, sync_auth_from_codex_cli,
+    CodexTurnRequest, StreamEvent, TurnMessage,
 };
 use openproof_protocol::{
     AgentRole, AgentStatus, BranchQueueState, HealthReport, MessageRole, ProofNodeKind,
@@ -292,7 +292,7 @@ async fn run_ask(prompt: String) -> Result<()> {
         messages: &[
             TurnMessage {
                 role: "system".to_string(),
-                content: "You are openproof, a concise formal math assistant.".to_string(),
+                content: "You are openproof, an aggressive formal math research agent. Attack problems directly with Lean 4 + Mathlib. Always produce concrete code. Never hedge about difficulty.".to_string(),
             },
             TurnMessage {
                 role: "user".to_string(),
@@ -1514,22 +1514,23 @@ fn handle_submission(
     let store_for_model = store.clone();
     tokio::spawn(async move {
         let messages = build_turn_messages_with_retrieval(&store_for_model, Some(&session_snapshot)).await;
-        // Stream deltas to the TUI so the user sees the response as it arrives
-        let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-        let tx_stream = tx_model.clone();
-        tokio::spawn(async move {
-            while let Some(delta) = delta_rx.recv().await {
-                let _ = tx_stream.send(AppEvent::StreamDelta(delta));
-            }
-        });
-        let result = run_codex_turn_streaming(
+        // Stream deltas and reasoning events to the TUI
+        let tx_events = tx_model.clone();
+        let result = run_codex_turn_with_events(
             CodexTurnRequest {
                 session_id: &submission.session_id,
                 messages: &messages,
                 model: "gpt-5.4",
                 reasoning_effort: "high",
             },
-            delta_tx,
+            move |event| match event {
+                StreamEvent::TextDelta(delta) => {
+                    let _ = tx_events.send(AppEvent::StreamDelta(delta));
+                }
+                StreamEvent::Reasoning => {
+                    let _ = tx_events.send(AppEvent::ReasoningStarted);
+                }
+            },
         )
         .await;
 
@@ -3330,8 +3331,8 @@ fn parse_statement_args(arg_text: &str) -> Option<(String, String)> {
 fn build_system_prompt(session: Option<&SessionSnapshot>) -> String {
     let prompt_context = load_prompt_context();
     let mut sections = vec![
-        "You are openproof, a concise formal math assistant working in a persistent terminal session.".to_string(),
-        "Keep momentum, be direct, and when a proof node is active prefer concrete Lean progress over exposition.".to_string(),
+        "You are openproof, an aggressive formal math research agent. You attack problems directly -- formalize, attempt proofs, verify with Lean. Never hedge about difficulty or say you 'probably cannot solve' something. Your job is to TRY. If a problem is open or hard, try anyway: make partial progress, find useful lemmas, reduce to sub-problems, and produce concrete Lean code. Every response should move toward a verified proof. Never offer a menu of what you 'can help with' -- just do the work.".to_string(),
+        "Keep momentum, be direct, prefer concrete Lean progress over exposition. When stuck, try a different approach rather than explaining why you are stuck.".to_string(),
         "When writing Lean 4 proofs: prefer well-known tactics (simp, omega, ring, norm_num, exact?, apply?, rw?) over guessing exact lemma names. If unsure of an exact Mathlib lemma name, use `exact?` or `apply?` to let Lean search at compile time. This avoids hallucinated lemma names that cause Unknown constant errors. Use fully-qualified names like `RingHom.ker f` instead of dot notation `f.ker` when field notation may not be available. Prefer `n.factorial` over `n!` notation. Use `Nat.Prime p` as the type for prime hypotheses.".to_string(),
         "When formalizing or continuing a proof, prefer structured progress markers such as TITLE, PROBLEM, FORMAL_TARGET, ACCEPTED_TARGET, PHASE, STATUS, QUESTION, OPTION, OPTION_TARGET, RECOMMENDED_OPTION, THEOREM, LEMMA, PAPER, NEXT, and fenced ```lean``` blocks when relevant.".to_string(),
         "Break complex proofs into sub-lemmas. For each key intermediate result, emit a separate LEMMA: label :: statement marker. This creates individual proof nodes for the dashboard graph.".to_string(),

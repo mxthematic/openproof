@@ -369,14 +369,97 @@ async fn read_event_stream(response: reqwest::Response) -> Result<String> {
     read_event_stream_with_callback(response, |_| {}).await
 }
 
+/// Status updates sent during reasoning phase.
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    /// A text delta from the model's visible output.
+    TextDelta(String),
+    /// The model is reasoning (thinking). The bool indicates if this is
+    /// a new reasoning event (true) or a continuation (false).
+    Reasoning,
+}
+
 async fn read_event_stream_with_callback(
     response: reqwest::Response,
     on_delta: impl Fn(&str),
+) -> Result<String> {
+    read_event_stream_with_events(response, |event| {
+        if let StreamEvent::TextDelta(ref delta) = event {
+            on_delta(delta);
+        }
+    })
+    .await
+}
+
+/// Like run_codex_turn_streaming but also reports reasoning events.
+pub async fn run_codex_turn_with_events(
+    request: CodexTurnRequest<'_>,
+    on_event: impl Fn(StreamEvent) + Send + 'static,
+) -> Result<String> {
+    let auth = load_auth_state()?
+        .filter(|state| state.auth_mode.as_deref() == Some("chatgpt"))
+        .context("Openproof is not authenticated. Run `openproof login`.")?;
+    let tokens = auth
+        .tokens
+        .context("Missing ChatGPT tokens in auth state.")?;
+
+    let client = reqwest::Client::builder().build()?;
+    let payload = build_turn_payload(&request);
+    let mut response = client
+        .post(format!("{OPENAI_CODEX_BASE_URL}/responses"))
+        .header("authorization", format!("Bearer {}", tokens.access_token))
+        .header("content-type", "application/json")
+        .header("accept", "text/event-stream")
+        .header("originator", DEFAULT_ORIGINATOR)
+        .header(
+            "chatgpt-account-id",
+            tokens.account_id.clone().unwrap_or_default(),
+        )
+        .header("session_id", request.session_id)
+        .json(&payload)
+        .send()
+        .await?;
+
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if let Ok(Some(_)) = sync_auth_from_codex_cli() {
+            let retry_auth = load_auth_state()?
+                .filter(|state| state.auth_mode.as_deref() == Some("chatgpt"))
+                .context("Openproof is not authenticated after sync.")?;
+            let retry_tokens = retry_auth
+                .tokens
+                .context("Missing ChatGPT tokens in synced auth state.")?;
+            response = client
+                .post(format!("{OPENAI_CODEX_BASE_URL}/responses"))
+                .header("authorization", format!("Bearer {}", retry_tokens.access_token))
+                .header("content-type", "application/json")
+                .header("accept", "text/event-stream")
+                .header("originator", DEFAULT_ORIGINATOR)
+                .header("chatgpt-account-id", retry_tokens.account_id.clone().unwrap_or_default())
+                .header("session_id", request.session_id)
+                .json(&payload)
+                .send()
+                .await?;
+        }
+    }
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default();
+        anyhow::bail!("OpenProof transport failed with status {status}: {detail}");
+    }
+
+    read_event_stream_with_events(response, on_event).await
+}
+
+async fn read_event_stream_with_events(
+    response: reqwest::Response,
+    on_event: impl Fn(StreamEvent),
 ) -> Result<String> {
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();
     let mut full_text = String::new();
     let mut completed_response: Option<Value> = None;
+    let mut reasoning_signaled = false;
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
@@ -390,16 +473,21 @@ async fn read_event_stream_with_callback(
 
         for part in parts {
             if let Some(event) = parse_sse_event(&part) {
+                let event_type = event.get("type").and_then(Value::as_str).unwrap_or("");
+
+                // Detect reasoning phase events
+                if event_type.contains("reasoning") && !reasoning_signaled {
+                    reasoning_signaled = true;
+                    on_event(StreamEvent::Reasoning);
+                }
+
                 if let Some(delta) = event.get("delta").and_then(Value::as_str).filter(|_| {
-                    event.get("type").and_then(Value::as_str) == Some("response.output_text.delta")
+                    event_type == "response.output_text.delta"
                 }) {
                     full_text.push_str(delta);
-                    on_delta(delta);
+                    on_event(StreamEvent::TextDelta(delta.to_string()));
                 }
-                if matches!(
-                    event.get("type").and_then(Value::as_str),
-                    Some("response.completed" | "response.done")
-                ) {
+                if matches!(event_type, "response.completed" | "response.done") {
                     if let Some(response_value) = event.get("response") {
                         completed_response = Some(response_value.clone());
                     }

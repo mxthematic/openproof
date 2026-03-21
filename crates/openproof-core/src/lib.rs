@@ -70,6 +70,7 @@ pub enum AppEvent {
     },
     StreamDelta(String),
     StreamFinished,
+    ReasoningStarted,
     AppendAssistant(String),
     AppendBranchAssistant { branch_id: String, content: String },
     FinishBranch {
@@ -1364,8 +1365,14 @@ impl AppState {
                 self.streaming_text.clear();
                 self.status = "Running assistant turn...".to_string();
             }
+            AppEvent::ReasoningStarted => {
+                self.status = "Reasoning...".to_string();
+            }
             AppEvent::StreamDelta(delta) => {
                 self.streaming_text.push_str(&delta);
+                if self.status.starts_with("Reasoning") {
+                    self.status = "Streaming response...".to_string();
+                }
             }
             AppEvent::StreamFinished => {
                 let text = std::mem::take(&mut self.streaming_text);

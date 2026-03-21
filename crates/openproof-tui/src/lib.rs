@@ -79,18 +79,71 @@ pub fn draw(frame: &mut custom_terminal::Frame<'_>, state: &mut AppState) {
 // Chat area (scrollable transcript)
 // ---------------------------------------------------------------------------
 
+fn splash_lines(area_height: u16) -> Vec<Line<'static>> {
+    const ART: &[&str] = &[
+        r"  ___                   ____                    __ ",
+        r" / _ \ _ __   ___ _ __ |  _ \ _ __ ___   ___  / _|",
+        r"| | | | '_ \ / _ \ '_ \| |_) | '__/ _ \ / _ \| |_ ",
+        r"| |_| | |_) |  __/ | | |  __/| | | (_) | (_) |  _|",
+        r" \___/| .__/ \___|_| |_|_|   |_|  \___/ \___/|_|  ",
+        r"      |_|                                          ",
+    ];
+    // art(6) + blank(1) + tagline(1) + blank(1) + hint(1) = 10
+    let content_height = ART.len() + 4;
+    let top_pad = if (area_height as usize) > content_height {
+        ((area_height as usize) - content_height) / 2
+    } else {
+        0
+    };
+
+    let mut lines: Vec<Line<'static>> = Vec::with_capacity(top_pad + content_height);
+    for _ in 0..top_pad {
+        lines.push(Line::from(""));
+    }
+
+    let art_style = Style::default().fg(Color::Cyan);
+    for art_line in ART {
+        lines.push(Line::from(Span::styled(art_line.to_string(), art_style)).centered());
+    }
+
+    lines.push(Line::from(""));
+    lines.push(
+        Line::from(Span::styled(
+            "Formal math proofs, conversationally".to_string(),
+            Style::default().fg(Color::Gray),
+        ))
+        .centered(),
+    );
+    lines.push(Line::from(""));
+    lines.push(
+        Line::from(Span::styled(
+            "Type a math problem or /help for commands.".to_string(),
+            Style::default().fg(Color::DarkGray),
+        ))
+        .centered(),
+    );
+
+    lines
+}
+
 fn draw_chat_area(f: &mut custom_terminal::Frame<'_>, state: &mut AppState, area: Rect) {
+    // Splash banner when chat is empty and no work in flight.
+    let is_empty = state
+        .current_session()
+        .map(|s| s.transcript.is_empty())
+        .unwrap_or(true);
+    if is_empty && !state.turn_in_flight && state.streaming_text.is_empty() {
+        let lines = splash_lines(area.height);
+        let para = Paragraph::new(lines);
+        f.render_widget(para, area);
+        return;
+    }
+
     let transcript_lines = state
         .current_session()
         .map(|session| {
             if session.transcript.is_empty() {
-                vec![
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        "  Type a math problem or /help for commands.",
-                        Style::default().fg(Color::DarkGray),
-                    )),
-                ]
+                vec![]
             } else {
                 // Only render entries not yet flushed to scrollback.
                 session
