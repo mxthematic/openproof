@@ -270,7 +270,7 @@ fn build_turn_payload(request: &CodexTurnRequest<'_>) -> Value {
         "input": request.messages.iter().map(serialize_turn_message).collect::<Vec<_>>(),
         "include": ["reasoning.encrypted_content"],
         "tool_choice": "auto",
-        "tools": [{ "type": "web_search_preview" }],
+        "tools": [{ "type": "web_search" }],
         "reasoning": {
             "effort": request.reasoning_effort
         }
