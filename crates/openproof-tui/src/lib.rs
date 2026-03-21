@@ -10,6 +10,99 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
+/// Strip structured markers from assistant output for clean display.
+/// Removes TITLE:, PHASE:, STATUS:, SEARCH:, FORMAL_TARGET:, ACCEPTED_TARGET:,
+/// ASSUMPTION:, PAPER:, PAPER_NOTE:, NEXT:, THEOREM:, LEMMA:, LEMMA_CANDIDATE:
+/// lines and ```latex fenced blocks. Keeps ```lean blocks and prose.
+fn strip_markers(content: &str) -> String {
+    let mut result = Vec::new();
+    let mut in_latex_block = false;
+    let mut in_lean_block = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Track fenced blocks
+        if trimmed.starts_with("```latex") {
+            in_latex_block = true;
+            continue;
+        }
+        if trimmed.starts_with("```lean") {
+            in_lean_block = true;
+            result.push(line.to_string());
+            continue;
+        }
+        if trimmed == "```" {
+            if in_latex_block {
+                in_latex_block = false;
+                continue;
+            }
+            if in_lean_block {
+                in_lean_block = false;
+                result.push(line.to_string());
+                continue;
+            }
+            result.push(line.to_string());
+            continue;
+        }
+
+        // Skip latex block content
+        if in_latex_block {
+            continue;
+        }
+
+        // Keep lean block content
+        if in_lean_block {
+            result.push(line.to_string());
+            continue;
+        }
+
+        // Skip structured marker lines
+        let upper = trimmed.to_uppercase();
+        if upper.starts_with("TITLE:")
+            || upper.starts_with("PHASE:")
+            || upper.starts_with("STATUS:")
+            || upper.starts_with("SEARCH:")
+            || upper.starts_with("FORMAL_TARGET:")
+            || upper.starts_with("ACCEPTED_TARGET:")
+            || upper.starts_with("ASSUMPTION:")
+            || upper.starts_with("PAPER:")
+            || upper.starts_with("PAPER_NOTE:")
+            || upper.starts_with("PAPER_TEX:")
+            || upper.starts_with("NEXT:")
+            || upper.starts_with("THEOREM:")
+            || upper.starts_with("LEMMA:")
+            || upper.starts_with("LEMMA_CANDIDATE:")
+            || upper.starts_with("OPTION:")
+            || upper.starts_with("OPTION_TARGET:")
+            || upper.starts_with("RECOMMENDED_OPTION:")
+            || upper.starts_with("QUESTION:")
+            || upper.starts_with("PROBLEM:")
+        {
+            continue;
+        }
+
+        result.push(line.to_string());
+    }
+
+    // Collapse multiple blank lines
+    let mut cleaned = Vec::new();
+    let mut prev_blank = false;
+    for line in &result {
+        if line.trim().is_empty() {
+            if !prev_blank {
+                cleaned.push(line.clone());
+            }
+            prev_blank = true;
+        } else {
+            cleaned.push(line.clone());
+            prev_blank = false;
+        }
+    }
+
+    cleaned.join("\n")
+}
+
 /// Render a single transcript entry into styled Lines (for flushing to scrollback).
 pub fn render_entry(entry: &openproof_protocol::TranscriptEntry) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = vec![Line::from("")];
@@ -23,7 +116,8 @@ pub fn render_entry(entry: &openproof_protocol::TranscriptEntry) -> Vec<Line<'st
             }
         }
         openproof_protocol::MessageRole::Assistant => {
-            lines.extend(markdown::render_markdown(&entry.content, Style::default()));
+            let cleaned = strip_markers(&entry.content);
+            lines.extend(markdown::render_markdown(&cleaned, Style::default()));
         }
         _ => {
             for content_line in entry.content.lines() {
@@ -166,8 +260,9 @@ fn draw_chat_area(f: &mut custom_terminal::Frame<'_>, state: &mut AppState, area
                                 }
                             }
                             openproof_protocol::MessageRole::Assistant => {
+                                let cleaned = strip_markers(&entry.content);
                                 lines.extend(markdown::render_markdown(
-                                    &entry.content,
+                                    &cleaned,
                                     Style::default(),
                                 ));
                             }
