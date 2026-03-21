@@ -211,6 +211,22 @@ fn resolve_lean_project_dir() -> PathBuf {
     lean_sub
 }
 
+fn extract_lean_blocks_from_text(content: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut rest = content;
+    while let Some(start) = rest.find("```lean") {
+        let after = &rest[start + "```lean".len()..];
+        let after = after.strip_prefix('\n').unwrap_or(after);
+        let Some(end) = after.find("```") else { break };
+        let block = after[..end].trim();
+        if !block.is_empty() {
+            blocks.push(block.to_string());
+        }
+        rest = &after[end + 3..];
+    }
+    blocks
+}
+
 fn print_help() {
     println!(
         "\
@@ -415,73 +431,88 @@ async fn run_autonomous(launch_cwd: PathBuf, problem: String, label: Option<Stri
         }
     }
 
-    // Direct verification: if any node already has lean content from the initial
-    // response, try verifying it immediately. If it passes, we're done -- no need
-    // for the autonomous loop at all.
+    // Direct verification: check if the initial response contains compilable lean code.
+    // If it verifies, skip the autonomous loop entirely.
     {
         let session = state.current_session().cloned().unwrap();
-        let nodes_with_content: Vec<_> = session.proof.nodes.iter()
+
+        // Collect lean candidates from nodes AND from lean code blocks in transcript
+        let mut lean_candidates: Vec<String> = session.proof.nodes.iter()
             .filter(|n| !n.content.trim().is_empty())
-            .cloned()
+            .map(|n| n.content.clone())
             .collect();
-        if !nodes_with_content.is_empty() {
-            eprintln!("[run] Found {} node(s) with lean content, verifying directly...", nodes_with_content.len());
+
+        if let Some(last_msg) = session.transcript.iter().rev()
+            .find(|e| e.role == MessageRole::Assistant)
+        {
+            for block in extract_lean_blocks_from_text(&last_msg.content) {
+                if !lean_candidates.iter().any(|c| c.trim() == block.trim()) {
+                    lean_candidates.push(block);
+                }
+            }
+        }
+
+        if !lean_candidates.is_empty() {
+            eprintln!("[run] Found {} lean candidate(s), verifying directly...", lean_candidates.len());
             let project_dir = resolve_lean_project_dir();
-            for node in &nodes_with_content {
-                eprintln!("[run] Verifying node: {} ({} chars)", node.label, node.content.len());
-                let session_for_verify = session.clone();
+            for (idx, candidate) in lean_candidates.iter().enumerate() {
+                eprintln!("[run] Verifying candidate {} ({} chars)", idx + 1, candidate.len());
+
+                // Ensure we have a node with this content for verification
+                if let Some(s) = state.current_session_mut() {
+                    if let Some(node) = s.proof.nodes.first_mut() {
+                        node.content = candidate.clone();
+                    }
+                }
+                let verify_session = state.current_session().cloned().unwrap();
                 let pd = project_dir.clone();
                 let result = tokio::task::spawn_blocking(move || {
-                    verify_active_node(&pd, &session_for_verify)
+                    verify_active_node(&pd, &verify_session)
                 }).await.ok().and_then(|r| r.ok());
 
                 if let Some(result) = result {
                     if result.ok {
-                        eprintln!("[run] *** DIRECT VERIFICATION SUCCEEDED for {} ***", node.label);
+                        eprintln!("[run] *** DIRECT VERIFICATION SUCCEEDED ***");
+
                         // Record in corpus
                         let sr = store.clone();
-                        let ss = session.clone();
+                        let ss = state.current_session().cloned().unwrap();
                         let rr = result.clone();
                         let _ = tokio::task::spawn_blocking(move || sr.record_verification_result(&ss, &rr)).await;
 
-                        // Update node status
+                        // Update state
                         if let Some(s) = state.current_session_mut() {
-                            if let Some(n) = s.proof.nodes.iter_mut().find(|n| n.id == node.id) {
+                            if let Some(n) = s.proof.nodes.first_mut() {
                                 n.status = openproof_protocol::ProofNodeStatus::Verified;
                             }
                             s.proof.phase = "done".to_string();
-                            s.proof.status_line = format!("Verified: {}", node.label);
+                            s.proof.status_line = "Verified on first attempt.".to_string();
                         }
                         if let Some(session) = state.current_session().cloned() {
                             let s = store.clone();
                             let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
                         }
 
-                        // Print and exit -- no autonomous loop needed
                         let session = state.current_session().cloned().unwrap();
-                        eprintln!("\n[run] === Summary (direct verification) ===");
-                        eprintln!("[run] Session: {} ({})", session.title, session.id);
-                        eprintln!("[run] Phase: {}", session.proof.phase);
-                        eprintln!("[run] Verified: {} :: {}", node.label, node.statement);
-                        eprintln!("{}", node.content);
+                        eprintln!("\n[run] === Verified (direct) ===");
+                        eprintln!("[run] Session: {}", session.title);
+                        eprintln!("{candidate}");
                         let corpus = store.get_corpus_summary()?;
-                        eprintln!("[run] Corpus: verified={}, user_verified={}, attempts={}",
-                            corpus.verified_entry_count, corpus.user_verified_count, corpus.attempt_log_count);
+                        eprintln!("[run] Corpus: verified={}, user_verified={}", corpus.verified_entry_count, corpus.user_verified_count);
                         return Ok(());
                     } else {
-                        eprintln!("[run] Direct verification failed for {}:", node.label);
-                        for line in result.stderr.lines().take(5) {
+                        eprintln!("[run] Candidate {} failed:", idx + 1);
+                        for line in result.stderr.lines().take(3) {
                             eprintln!("[run]   {line}");
                         }
-                        // Record the attempt
                         let sr = store.clone();
-                        let ss = session.clone();
+                        let ss = state.current_session().cloned().unwrap();
                         let rr = result.clone();
                         let _ = tokio::task::spawn_blocking(move || sr.record_verification_result(&ss, &rr)).await;
                     }
                 }
             }
-            eprintln!("[run] Direct verification did not succeed. Falling through to autonomous loop.");
+            eprintln!("[run] Direct verification did not succeed. Entering autonomous loop.");
         }
     }
 
