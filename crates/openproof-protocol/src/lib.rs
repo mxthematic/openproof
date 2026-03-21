@@ -232,6 +232,12 @@ pub struct ProofSessionState {
     pub last_verification: Option<LeanVerificationSummary>,
     /// Accumulated LaTeX paper body, written incrementally by the model.
     pub paper_tex: String,
+    /// Path to the persistent Scratch.lean file for this session.
+    pub scratch_path: Option<String>,
+    /// Path to the persistent Paper.tex file for this session.
+    pub paper_path: Option<String>,
+    /// How many lean verification attempts have been made.
+    pub attempt_number: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

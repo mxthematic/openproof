@@ -1409,6 +1409,10 @@ impl AppState {
                     session.updated_at = now.clone();
                     session.proof.last_rendered_scratch = Some(result.rendered_scratch.clone());
                     session.proof.last_verification = Some(result.clone());
+                    session.proof.attempt_number = session.proof.attempt_number.saturating_add(1);
+                    if !result.scratch_path.is_empty() {
+                        session.proof.scratch_path = Some(result.scratch_path.clone());
+                    }
                     let active_node_id = session.proof.active_node_id.clone();
                     if let Some(node_id) = active_node_id {
                         if let Some(node) = session.proof.nodes.iter_mut().find(|node| node.id == node_id) {
@@ -2255,6 +2259,9 @@ fn default_session_with_workspace(
             last_rendered_scratch: None,
             last_verification: None,
             paper_tex: String::new(),
+            scratch_path: None,
+            paper_path: None,
+            attempt_number: 0,
         },
     }
 }

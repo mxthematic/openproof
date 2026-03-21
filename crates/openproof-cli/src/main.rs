@@ -1587,9 +1587,33 @@ fn start_branch_verification(
 
     let _ = tx.send(AppEvent::LeanVerifyStarted);
     let project_dir = resolve_lean_project_dir();
+
+    // Write to persistent scratch file and archive previous attempt
+    let session_id = session_snapshot.id.clone();
+    let persistent_scratch = store
+        .write_scratch(
+            &session_id,
+            &openproof_lean::render_node_scratch(&verification_session,
+                verification_session.proof.nodes.iter()
+                    .find(|n| Some(n.id.as_str()) == verification_session.proof.active_node_id.as_deref())
+                    .unwrap_or(&verification_session.proof.nodes[0])),
+        )
+        .ok()
+        .map(|(path, _)| path);
+
     tokio::spawn(async move {
+        let scratch = persistent_scratch.clone();
         let verification_clone = verification_session.clone();
-        let result = tokio::task::spawn_blocking(move || verify_active_node(&project_dir, &verification_clone))
+        let result = tokio::task::spawn_blocking(move || {
+            openproof_lean::verify_node_at(
+                &project_dir,
+                &verification_clone,
+                verification_clone.proof.nodes.iter()
+                    .find(|n| Some(n.id.as_str()) == verification_clone.proof.active_node_id.as_deref())
+                    .unwrap_or(&verification_clone.proof.nodes[0]),
+                scratch.as_deref(),
+            )
+        })
             .await
             .ok()
             .and_then(Result::ok);
@@ -2235,8 +2259,60 @@ fn apply_local_command(
             let report = state.proof_status_report();
             emit_local_notice(tx, state, store, "Proof State", report);
         }
+        "/lean" => {
+            let session = state.current_session().cloned();
+            let content = if let Some(session) = &session {
+                let scratch = store.read_scratch(&session.id);
+                let history = store.list_scratch_history(&session.id);
+                let scratch_path = session.proof.scratch_path.as_deref().unwrap_or("(not set)");
+                let attempt = session.proof.attempt_number;
+                let verification = session.proof.last_verification.as_ref();
+                let mut lines = vec![
+                    format!("Scratch: {scratch_path}"),
+                    format!("Attempts: {attempt}"),
+                    format!("History: {} files", history.len()),
+                ];
+                if let Some(v) = verification {
+                    lines.push(format!("Last check: {}", if v.ok { "OK" } else { "FAILED" }));
+                    if !v.ok {
+                        for line in v.stderr.lines().take(3) {
+                            lines.push(format!("  {line}"));
+                        }
+                    }
+                }
+                if let Some(content) = scratch {
+                    lines.push(String::new());
+                    lines.push("```lean".to_string());
+                    lines.push(content);
+                    lines.push("```".to_string());
+                } else {
+                    lines.push("No Scratch.lean file yet.".to_string());
+                }
+                lines.join("\n")
+            } else {
+                "No active session.".to_string()
+            };
+            emit_local_notice(tx, state, store, "Lean State", content);
+        }
         "/paper" => {
-            emit_local_notice(tx, state, store, "Paper", state.paper_report());
+            // Also persist paper to file
+            if let Some(session) = state.current_session().cloned() {
+                if !session.proof.paper_tex.trim().is_empty() {
+                    if let Ok(path) = store.write_paper(&session.id, &session.proof.paper_tex) {
+                        emit_local_notice(
+                            tx.clone(), state, store.clone(),
+                            "Paper",
+                            format!("{}\n\nWritten to: {}", state.paper_report(), path.display()),
+                        );
+                    } else {
+                        emit_local_notice(tx, state, store, "Paper", state.paper_report());
+                    }
+                } else {
+                    emit_local_notice(tx, state, store, "Paper", state.paper_report());
+                }
+            } else {
+                emit_local_notice(tx, state, store, "Paper", "No active session.".to_string());
+            }
         }
         "/questions" => {
             emit_local_notice(tx, state, store, "Questions", state.pending_question_report());

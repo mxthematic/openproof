@@ -66,6 +66,17 @@ pub fn verify_node(
     session: &SessionSnapshot,
     node: &ProofNode,
 ) -> Result<LeanVerificationSummary> {
+    verify_node_at(project_dir, session, node, None)
+}
+
+/// Verify a node, optionally writing to a persistent scratch path.
+/// If `persistent_path` is Some, writes to that path instead of a temp file.
+pub fn verify_node_at(
+    project_dir: &Path,
+    session: &SessionSnapshot,
+    node: &ProofNode,
+    persistent_path: Option<&Path>,
+) -> Result<LeanVerificationSummary> {
     if node.content.trim().is_empty() {
         return Ok(failed_result(
             project_dir,
@@ -80,7 +91,15 @@ pub fn verify_node(
     }
 
     let rendered_scratch = render_node_scratch(session, node);
-    let scratch_path = write_temp_scratch(&rendered_scratch)?;
+    let scratch_path = if let Some(path) = persistent_path {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, &rendered_scratch)?;
+        path.to_path_buf()
+    } else {
+        write_temp_scratch(&rendered_scratch)?
+    };
     verify_scratch(project_dir, rendered_scratch, scratch_path)
 }
 
