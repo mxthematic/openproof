@@ -210,10 +210,40 @@ impl AppState {
                     branch.phase = Some(phase.trim().to_string());
                     branch.progress_kind = Some(phase.trim().to_string());
                 }
-                if let Some(snippet) = parsed
-                    .lean_snippets
-                    .first()
-                    .cloned()
+                // Check for patch format first -- surgical edits preferred over full rewrites
+                let snippet_from_patch = if openproof_lean::patch::contains_patch(text) {
+                    if let Some(patch_text) = openproof_lean::patch::extract_patch(text) {
+                        let current = session.proof.last_rendered_scratch
+                            .as_deref()
+                            .or_else(|| session.proof.nodes.iter()
+                                .find(|n| Some(n.id.as_str()) == session.proof.active_node_id.as_deref())
+                                .map(|n| n.content.as_str()))
+                            .unwrap_or("");
+                        openproof_lean::patch::apply_patch(current, &patch_text)
+                            .map(|result| {
+                                // Add patch diff as a visible notice
+                                session.transcript.push(TranscriptEntry {
+                                    id: next_id("native_msg"),
+                                    role: MessageRole::Notice,
+                                    title: Some("Patch".to_string()),
+                                    content: format!(
+                                        "Applied patch: {}\n{}",
+                                        result.diff_summary.lines().next().unwrap_or(""),
+                                        result.diff_summary.lines().skip(1).take(6).collect::<Vec<_>>().join("\n"),
+                                    ),
+                                    created_at: now.clone(),
+                                });
+                                result.patched_content
+                            })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                if let Some(snippet) = snippet_from_patch
+                    .or_else(|| parsed.lean_snippets.first().cloned())
                     .or_else(|| extract_lean_code_block(text))
                 {
                     branch.lean_snippet = snippet.clone();

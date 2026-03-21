@@ -1,3 +1,5 @@
+pub mod patch;
+
 use anyhow::{Context, Result};
 use chrono::Utc;
 use openproof_protocol::{

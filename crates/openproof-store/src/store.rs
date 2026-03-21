@@ -77,6 +77,15 @@ impl AppStore {
 
     /// Write the Scratch.lean file for a session.
     /// Archives the previous version to history/NNN_attempt.lean first.
+    /// Write a patch diff alongside the attempt archive.
+    pub fn write_patch_diff(&self, session_id: &str, attempt_number: usize, diff: &str) -> Result<()> {
+        let dir = self.session_dir(session_id)?;
+        let history_dir = dir.join("history");
+        let diff_path = history_dir.join(format!("{:03}_patch.diff", attempt_number));
+        fs::write(diff_path, diff)?;
+        Ok(())
+    }
+
     pub fn write_scratch(&self, session_id: &str, content: &str) -> Result<(PathBuf, usize)> {
         let dir = self.session_dir(session_id)?;
         let scratch_path = dir.join("Scratch.lean");

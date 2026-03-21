@@ -312,6 +312,32 @@ pub fn run_autonomous_step(
 
         let mut repair_context = String::new();
 
+        // Show current file with line numbers so the model can patch surgically
+        let current_content = latest_session.proof.last_rendered_scratch
+            .as_deref()
+            .or_else(|| latest_session.proof.nodes.first().map(|n| n.content.as_str()))
+            .unwrap_or("");
+        if !current_content.trim().is_empty() {
+            repair_context.push_str("Current Scratch.lean:\n```\n");
+            for (i, line) in current_content.lines().enumerate() {
+                repair_context.push_str(&format!("{:4}: {}\n", i + 1, line));
+            }
+            repair_context.push_str("```\n\n");
+            repair_context.push_str(
+                "Output a PATCH to fix the errors. Use this format:\n\
+                 *** Begin Patch\n\
+                 *** Update File: Scratch.lean\n\
+                 @@ context line\n\
+                  context line (unchanged, prefixed with space)\n\
+                 -old broken line (prefixed with -)\n\
+                 +fixed line (prefixed with +)\n\
+                  context line\n\
+                 *** End Patch\n\n\
+                 Only change what's needed. Do NOT rewrite the entire file.\n\
+                 If you must rewrite, use a ```lean code block instead.\n\n"
+            );
+        }
+
         // Grounding facts from Lean output
         let grounding = openproof_lean::extract_grounding_from_lean_output(
             &basis.last_lean_diagnostic,
