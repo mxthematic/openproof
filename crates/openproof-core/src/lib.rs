@@ -5,6 +5,7 @@ mod apply_streaming;
 mod commands;
 mod helpers;
 mod parser;
+mod proof;
 mod reports;
 mod session;
 mod state;
