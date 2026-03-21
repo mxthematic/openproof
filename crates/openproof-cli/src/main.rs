@@ -1,3 +1,5 @@
+mod setup;
+
 use anyhow::{bail, Result};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
@@ -63,7 +65,22 @@ async fn main() -> Result<()> {
         Command::Run { problem, label } => run_autonomous(options.launch_cwd, problem, label).await,
         Command::Dashboard { open, port } => run_dashboard(options.launch_cwd, open, port).await,
         Command::ReclusterCorpus => run_recluster_corpus().await,
-        Command::Shell => run_shell(options.launch_cwd).await,
+        Command::Shell => {
+            // First-run setup wizard.
+            if !setup::is_setup_complete() {
+                match setup::run_wizard()? {
+                    Some(result) => {
+                        setup::save_config(&result)?;
+                        eprintln!("Setup complete. Starting openproof...");
+                    }
+                    None => {
+                        eprintln!("Setup cancelled.");
+                        return Ok(());
+                    }
+                }
+            }
+            run_shell(options.launch_cwd).await
+        }
     }
 }
 
@@ -467,8 +484,23 @@ async fn run_autonomous(launch_cwd: PathBuf, problem: String, label: Option<Stri
                 }
                 let verify_session = state.current_session().cloned().unwrap();
                 let pd = project_dir.clone();
+
+                // Write to persistent scratch file
+                let session_id = verify_session.id.clone();
+                let rendered = openproof_lean::render_node_scratch(
+                    &verify_session,
+                    verify_session.proof.nodes.first().unwrap(),
+                );
+                let persistent_path = store.write_scratch(&session_id, &rendered)
+                    .ok().map(|(p, _)| p);
+
                 let result = tokio::task::spawn_blocking(move || {
-                    verify_active_node(&pd, &verify_session)
+                    openproof_lean::verify_node_at(
+                        &pd,
+                        &verify_session,
+                        verify_session.proof.nodes.first().unwrap(),
+                        persistent_path.as_deref(),
+                    )
                 }).await.ok().and_then(|r| r.ok());
 
                 if let Some(result) = result {
