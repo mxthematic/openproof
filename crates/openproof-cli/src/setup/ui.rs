@@ -3,7 +3,7 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use super::app::{SetupApp, Step, CORPUS_MODES, PROVIDERS};
@@ -154,7 +154,7 @@ fn draw_corpus_step(f: &mut Frame, app: &SetupApp, area: Rect) {
 }
 
 fn draw_finish(f: &mut Frame, app: &SetupApp, area: Rect) {
-    let (provider_id, provider_label, _) = PROVIDERS[app.provider_selected];
+    let (_, provider_label, _) = PROVIDERS[app.provider_selected];
     let (corpus_id, corpus_label) = CORPUS_MODES[app.corpus_selected];
 
     let lines = vec![

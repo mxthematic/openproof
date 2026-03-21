@@ -48,6 +48,7 @@ pub fn is_setup_complete() -> bool {
 }
 
 /// Load the setup config.
+#[allow(dead_code)]
 pub fn load_config() -> Option<SetupResult> {
     let content = std::fs::read_to_string(config_path()).ok()?;
     serde_json::from_str(&content).ok()
