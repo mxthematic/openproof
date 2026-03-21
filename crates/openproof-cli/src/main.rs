@@ -1302,7 +1302,8 @@ fn apply_local_command(
             }
         }
         "/proof" => {
-            let _ = state.apply(AppEvent::ToggleProofPane);
+            let report = state.proof_status_report();
+            emit_local_notice(tx, state, store, "Proof State", report);
         }
         "/paper" => {
             emit_local_notice(tx, state, store, "Paper", state.paper_report());

@@ -1167,6 +1167,63 @@ impl AppState {
         lines.join("\n")
     }
 
+    pub fn proof_status_report(&self) -> String {
+        let Some(session) = self.current_session() else {
+            return "No active session.".to_string();
+        };
+        let mut lines = vec![
+            format!("Phase: {}", session.proof.phase),
+            format!("Status: {}", session.proof.status_line),
+        ];
+        if let Some(problem) = &session.proof.problem {
+            lines.push(format!("Problem: {problem}"));
+        }
+        if let Some(target) = &session.proof.formal_target {
+            lines.push(format!("Formal target: {target}"));
+        }
+        if let Some(target) = &session.proof.accepted_target {
+            lines.push(format!("Accepted target: {target}"));
+        }
+        if session.proof.nodes.is_empty() {
+            lines.push("No proof nodes.".to_string());
+        } else {
+            lines.push(String::new());
+            lines.push(format!("Nodes ({}):", session.proof.nodes.len()));
+            for node in &session.proof.nodes {
+                lines.push(format!(
+                    "  {} [{}] :: {}",
+                    node.label,
+                    format_node_status(node.status),
+                    node.statement
+                ));
+            }
+        }
+        if !session.proof.branches.is_empty() {
+            lines.push(String::new());
+            lines.push(format!("Branches ({}):", session.proof.branches.len()));
+            for branch in session.proof.branches.iter().rev().take(6).rev() {
+                lines.push(format!(
+                    "  {} [{}] {}",
+                    agent_role_label(branch.role),
+                    format_agent_status(branch.status),
+                    branch.title
+                ));
+            }
+        }
+        if let Some(last) = &session.proof.last_verification {
+            lines.push(String::new());
+            if last.ok {
+                lines.push("Last verification: OK".to_string());
+            } else {
+                lines.push(format!(
+                    "Last verification: FAILED -- {}",
+                    last.stderr.lines().next().unwrap_or("error")
+                ));
+            }
+        }
+        lines.join("\n")
+    }
+
     pub fn apply(&mut self, event: AppEvent) -> Option<PendingWrite> {
         match event {
             AppEvent::InputChar(ch) => {
