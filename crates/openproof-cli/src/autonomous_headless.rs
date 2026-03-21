@@ -1,0 +1,396 @@
+//! Headless autonomous proof-search entry point (`openproof run`).
+//!
+//! This module owns `run_autonomous`, the non-interactive CLI path.
+//! The TUI-driven step functions (`schedule_autonomous_tick`,
+//! `run_autonomous_step`) live in `autonomous.rs`.
+
+use crate::autonomous::{drain_until_settled, run_autonomous_step};
+use crate::helpers::{
+    autonomous_stop_reason, extract_lean_blocks_from_text, persist_write,
+    resolve_lean_project_dir,
+};
+use crate::system_prompt::build_turn_messages_with_retrieval;
+use anyhow::{bail, Result};
+use openproof_core::{AppEvent, AppState, AutonomousRunPatch};
+use openproof_model::{
+    load_auth_summary, run_codex_turn, sync_auth_from_codex_cli, CodexTurnRequest,
+};
+use openproof_protocol::{MessageRole, ProofNodeKind};
+use openproof_store::{AppStore, StorePaths};
+use std::path::PathBuf;
+use tokio::sync::mpsc;
+
+pub async fn run_autonomous(
+    launch_cwd: PathBuf,
+    problem: String,
+    label: Option<String>,
+) -> Result<()> {
+    let store = AppStore::open(StorePaths::detect()?)?;
+    let _ = store.import_legacy_sessions();
+    let workspace_label = launch_cwd
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "workspace".to_string());
+
+    let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
+
+    let sessions = store.list_sessions()?;
+    let wr = Some(launch_cwd.to_string_lossy().to_string());
+    let wl = Some(workspace_label.clone());
+    let mut state = AppState::new(sessions, String::new(), wr.clone(), wl.clone());
+
+    let title = label.unwrap_or_else(|| {
+        let preview: String = problem.chars().take(60).collect();
+        format!("auto: {preview}")
+    });
+    let write = state.create_session(Some(&title));
+    persist_write(tx.clone(), store.clone(), write);
+
+    // Load auth
+    eprintln!("[run] Loading auth...");
+    match sync_auth_from_codex_cli() {
+        Ok(Some(summary)) => {
+            let _ = state.apply(AppEvent::AuthLoaded(summary));
+        }
+        _ => {
+            if let Ok(summary) = load_auth_summary() {
+                let _ = state.apply(AppEvent::AuthLoaded(summary));
+            }
+        }
+    }
+    if !state.auth.logged_in {
+        bail!("Not authenticated. Run `openproof login` first.");
+    }
+    eprintln!(
+        "[run] Auth: {} ({})",
+        state.auth.email.as_deref().unwrap_or("unknown"),
+        state.auth.plan.as_deref().unwrap_or("?")
+    );
+
+    // Load lean health
+    let lean_dir = resolve_lean_project_dir();
+    let lean_dir_clone = lean_dir.clone();
+    if let Ok(health) =
+        tokio::task::spawn_blocking(move || openproof_lean::detect_lean_health(&lean_dir_clone))
+            .await?
+    {
+        let _ = state.apply(AppEvent::LeanLoaded(health));
+    }
+    eprintln!(
+        "[run] Lean: ok={}, version={}",
+        state.lean.ok,
+        state.lean.lean_version.as_deref().unwrap_or("?")
+    );
+
+    // Submit problem as user message
+    eprintln!("[run] Problem: {problem}");
+    let submitted = state.submit_text(problem.clone());
+    if let Some(_input) = submitted {
+        if let Some(session) = state.current_session().cloned() {
+            let s = store.clone();
+            let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
+        }
+
+        let session = state.current_session().cloned().unwrap();
+        let messages = build_turn_messages_with_retrieval(&store, Some(&session)).await;
+        eprintln!("[run] Running initial model turn...");
+        let _ = state.apply(AppEvent::TurnStarted);
+        match run_codex_turn(CodexTurnRequest {
+            session_id: &session.id,
+            messages: &messages,
+            model: "gpt-5.4",
+            reasoning_effort: "high",
+        })
+        .await
+        {
+            Ok(text) => {
+                eprintln!(
+                    "[run] Response ({} chars, {} lines)",
+                    text.len(),
+                    text.lines().count()
+                );
+                for line in text.lines().take(15) {
+                    eprintln!("  | {line}");
+                }
+                if text.lines().count() > 15 {
+                    eprintln!("  | ... ({} more lines)", text.lines().count() - 15);
+                }
+                let _ = state.apply(AppEvent::AppendAssistant(text));
+                let _ = state.apply(AppEvent::TurnFinished);
+            }
+            Err(e) => {
+                eprintln!("[run] Model error: {e}");
+                let _ = state.apply(AppEvent::TurnFinished);
+            }
+        }
+        if let Some(session) = state.current_session().cloned() {
+            let s = store.clone();
+            let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
+        }
+    }
+
+    // Report extracted state
+    let session = state.current_session().cloned().unwrap();
+    eprintln!("[run] Phase: {}", session.proof.phase);
+    eprintln!("[run] Formal target: {:?}", session.proof.formal_target);
+    eprintln!("[run] Accepted target: {:?}", session.proof.accepted_target);
+    eprintln!("[run] Nodes: {}", session.proof.nodes.len());
+    for node in &session.proof.nodes {
+        eprintln!(
+            "[run]   {} [{:?}]: {}",
+            node.label, node.status, node.statement
+        );
+    }
+
+    if session.proof.formal_target.is_none()
+        && session.proof.accepted_target.is_none()
+        && session.proof.nodes.is_empty()
+    {
+        eprintln!("[run] No target extracted. Adding theorem node from problem.");
+        let _ = state.add_proof_node(ProofNodeKind::Theorem, &title, &problem);
+    }
+
+    // Auto-accept target if none accepted yet
+    let session = state.current_session().cloned().unwrap();
+    if session.proof.accepted_target.is_none() {
+        let target = session
+            .proof
+            .formal_target
+            .clone()
+            .or_else(|| session.proof.nodes.first().map(|n| n.statement.clone()))
+            .unwrap_or_else(|| problem.clone());
+        eprintln!(
+            "[run] Auto-accepting target: {}",
+            target.chars().take(100).collect::<String>()
+        );
+        if let Some(s) = state.current_session_mut() {
+            s.proof.accepted_target = Some(target);
+            s.proof.phase = "proving".to_string();
+        }
+        if let Some(session) = state.current_session().cloned() {
+            let s = store.clone();
+            let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
+        }
+    }
+
+    // Direct verification: check if the initial response contains compilable lean code.
+    {
+        let session = state.current_session().cloned().unwrap();
+        let mut lean_candidates: Vec<String> = session
+            .proof
+            .nodes
+            .iter()
+            .filter(|n| !n.content.trim().is_empty())
+            .map(|n| n.content.clone())
+            .collect();
+
+        if let Some(last_msg) = session
+            .transcript
+            .iter()
+            .rev()
+            .find(|e| e.role == MessageRole::Assistant)
+        {
+            for block in extract_lean_blocks_from_text(&last_msg.content) {
+                if !lean_candidates.iter().any(|c| c.trim() == block.trim()) {
+                    lean_candidates.push(block);
+                }
+            }
+        }
+
+        if !lean_candidates.is_empty() {
+            eprintln!(
+                "[run] Found {} lean candidate(s), verifying directly...",
+                lean_candidates.len()
+            );
+            let project_dir = resolve_lean_project_dir();
+            for (idx, candidate) in lean_candidates.iter().enumerate() {
+                eprintln!(
+                    "[run] Verifying candidate {} ({} chars)",
+                    idx + 1,
+                    candidate.len()
+                );
+
+                if let Some(s) = state.current_session_mut() {
+                    if let Some(node) = s.proof.nodes.first_mut() {
+                        node.content = candidate.clone();
+                    }
+                }
+                let verify_session = state.current_session().cloned().unwrap();
+                let pd = project_dir.clone();
+
+                let session_id = verify_session.id.clone();
+                let rendered = openproof_lean::render_node_scratch(
+                    &verify_session,
+                    verify_session.proof.nodes.first().unwrap(),
+                );
+                let persistent_path = store
+                    .write_scratch(&session_id, &rendered)
+                    .ok()
+                    .map(|(p, _)| p);
+
+                let result = tokio::task::spawn_blocking(move || {
+                    openproof_lean::verify_node_at(
+                        &pd,
+                        &verify_session,
+                        verify_session.proof.nodes.first().unwrap(),
+                        persistent_path.as_deref(),
+                    )
+                })
+                .await
+                .ok()
+                .and_then(|r| r.ok());
+
+                if let Some(result) = result {
+                    if result.ok {
+                        eprintln!("[run] *** DIRECT VERIFICATION SUCCEEDED ***");
+                        let sr = store.clone();
+                        let ss = state.current_session().cloned().unwrap();
+                        let rr = result.clone();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            sr.record_verification_result(&ss, &rr)
+                        })
+                        .await;
+
+                        if let Some(s) = state.current_session_mut() {
+                            if let Some(n) = s.proof.nodes.first_mut() {
+                                n.status = openproof_protocol::ProofNodeStatus::Verified;
+                            }
+                            s.proof.phase = "done".to_string();
+                            s.proof.status_line = "Verified on first attempt.".to_string();
+                        }
+                        if let Some(session) = state.current_session().cloned() {
+                            let s = store.clone();
+                            let _ =
+                                tokio::task::spawn_blocking(move || s.save_session(&session))
+                                    .await;
+                        }
+
+                        let session = state.current_session().cloned().unwrap();
+                        eprintln!("\n[run] === Verified (direct) ===");
+                        eprintln!("[run] Session: {}", session.title);
+                        eprintln!("{candidate}");
+                        let corpus = store.get_corpus_summary()?;
+                        eprintln!(
+                            "[run] Corpus: verified={}, user_verified={}",
+                            corpus.verified_entry_count, corpus.user_verified_count
+                        );
+                        return Ok(());
+                    } else {
+                        eprintln!("[run] Candidate {} failed:", idx + 1);
+                        for line in result.stderr.lines().take(3) {
+                            eprintln!("[run]   {line}");
+                        }
+                        let sr = store.clone();
+                        let ss = state.current_session().cloned().unwrap();
+                        let rr = result.clone();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            sr.record_verification_result(&ss, &rr)
+                        })
+                        .await;
+                    }
+                }
+            }
+            eprintln!("[run] Direct verification did not succeed. Entering autonomous loop.");
+        }
+    }
+
+    // Start autonomous loop
+    eprintln!("\n[run] === Starting autonomous loop ===\n");
+    if let Ok(write) = state.set_autonomous_run_state(AutonomousRunPatch {
+        is_autonomous_running: Some(true),
+        autonomous_iteration_count: Some(0),
+        autonomous_started_at: Some(Some(chrono::Utc::now().to_rfc3339())),
+        autonomous_pause_reason: Some(None),
+        autonomous_stop_reason: Some(None),
+        ..AutonomousRunPatch::default()
+    }) {
+        persist_write(tx.clone(), store.clone(), write);
+    }
+
+    let max_iterations = 12;
+    for iteration in 1..=max_iterations {
+        let session = state.current_session().cloned().unwrap();
+        if !session.proof.is_autonomous_running {
+            eprintln!(
+                "[run] Autonomous stopped: {:?}",
+                session.proof.autonomous_pause_reason
+            );
+            break;
+        }
+        if let Some(reason) = autonomous_stop_reason(&session) {
+            eprintln!("[run] Stop: {reason}");
+            break;
+        }
+
+        eprintln!("\n[run] --- Iteration {iteration}/{max_iterations} ---");
+        eprintln!(
+            "[run] Phase={}, Branches={}, Nodes={}",
+            session.proof.phase,
+            session.proof.branches.len(),
+            session.proof.nodes.len()
+        );
+
+        match run_autonomous_step(tx.clone(), store.clone(), &mut state) {
+            Ok(summary) => {
+                for line in summary.lines() {
+                    eprintln!("[run] {line}");
+                }
+            }
+            Err(reason) => {
+                eprintln!("[run] Step error: {reason}");
+                break;
+            }
+        }
+
+        // Drain events until all branches settle
+        drain_until_settled(tx.clone(), store.clone(), &mut state, &mut rx).await;
+
+        if let Some(session) = state.current_session().cloned() {
+            let s = store.clone();
+            let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
+        }
+
+        let session = state.current_session().cloned().unwrap();
+        let verified: Vec<_> = session
+            .proof
+            .nodes
+            .iter()
+            .filter(|n| n.status == openproof_protocol::ProofNodeStatus::Verified)
+            .collect();
+        if !verified.is_empty() {
+            eprintln!("\n[run] *** {} node(s) VERIFIED ***", verified.len());
+            for node in &verified {
+                eprintln!("[run] {}: {}", node.label, node.statement);
+                eprintln!("{}", node.content);
+            }
+            break;
+        }
+    }
+
+    let session = state.current_session().cloned().unwrap();
+    eprintln!("\n[run] === Summary ===");
+    eprintln!("[run] Session: {} ({})", session.title, session.id);
+    eprintln!("[run] Phase: {}", session.proof.phase);
+    eprintln!("[run] Iterations: {}", session.proof.autonomous_iteration_count);
+    eprintln!("[run] Nodes: {}", session.proof.nodes.len());
+    for n in &session.proof.nodes {
+        eprintln!("[run]   {} [{:?}]", n.label, n.status);
+    }
+    eprintln!("[run] Branches: {}", session.proof.branches.len());
+    for b in &session.proof.branches {
+        eprintln!(
+            "[run]   {} [{:?}] score={:.1} attempts={}",
+            b.title, b.status, b.score, b.attempt_count
+        );
+    }
+    let corpus = store.get_corpus_summary()?;
+    eprintln!(
+        "[run] Corpus: verified={}, user_verified={}, attempts={}",
+        corpus.verified_entry_count, corpus.user_verified_count, corpus.attempt_log_count
+    );
+
+    let s = store.clone();
+    let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
+    Ok(())
+}
+
