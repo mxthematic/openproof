@@ -77,6 +77,38 @@ impl AppState {
             if !result.scratch_path.is_empty() {
                 session.proof.scratch_path = Some(result.scratch_path.clone());
             }
+
+            // Parse the Lean file to extract proof tree structure
+            let parsed_decls = openproof_lean::parse_lean_declarations(&result.rendered_scratch);
+            if !parsed_decls.is_empty() {
+                let parsed_nodes = openproof_lean::declarations_to_proof_nodes(
+                    &parsed_decls,
+                    &session.id,
+                );
+                // Merge: update existing nodes by name, add new ones
+                for pn in &parsed_nodes {
+                    if let Some(existing) = session.proof.nodes.iter_mut().find(|n| n.label == pn.label) {
+                        existing.content = pn.content.clone();
+                        existing.statement = pn.statement.clone();
+                        existing.kind = pn.kind;
+                        existing.parent_id = pn.parent_id.clone();
+                        existing.depth = pn.depth;
+                        existing.updated_at = now.clone();
+                    } else {
+                        let mut new_node = pn.clone();
+                        new_node.status = ProofNodeStatus::Pending;
+                        new_node.updated_at = now.clone();
+                        session.proof.nodes.push(new_node);
+                    }
+                }
+                // Set root node if not set
+                if session.proof.root_node_id.is_none() {
+                    if let Some(root) = parsed_nodes.first() {
+                        session.proof.root_node_id = Some(root.id.clone());
+                    }
+                }
+            }
+
             let active_node_id = session.proof.active_node_id.clone();
             if let Some(node_id) = active_node_id {
                 if let Some(node) = session
@@ -175,6 +207,32 @@ impl AppState {
         self.verification_in_flight = false;
         let now = Utc::now().to_rfc3339();
         if let Some(snapshot) = self.current_session_mut().map(|session| {
+            // Parse Lean declarations from the rendered scratch to build proof tree
+            if !result.rendered_scratch.is_empty() {
+                let parsed_decls = openproof_lean::parse_lean_declarations(&result.rendered_scratch);
+                if !parsed_decls.is_empty() {
+                    let parsed_nodes = openproof_lean::declarations_to_proof_nodes(
+                        &parsed_decls,
+                        &session.id,
+                    );
+                    for pn in &parsed_nodes {
+                        if let Some(existing) = session.proof.nodes.iter_mut().find(|n| n.label == pn.label) {
+                            existing.content = pn.content.clone();
+                            existing.statement = pn.statement.clone();
+                            existing.kind = pn.kind;
+                            existing.parent_id = pn.parent_id.clone();
+                            existing.depth = pn.depth;
+                            existing.updated_at = now.clone();
+                        } else {
+                            let mut new_node = pn.clone();
+                            new_node.status = openproof_protocol::ProofNodeStatus::Pending;
+                            new_node.updated_at = now.clone();
+                            session.proof.nodes.push(new_node);
+                        }
+                    }
+                }
+            }
+
             let root_node_id = session.proof.root_node_id.clone();
             let focus_node_id = focus_node_id
                 .or_else(|| {
