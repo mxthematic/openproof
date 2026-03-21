@@ -415,6 +415,76 @@ async fn run_autonomous(launch_cwd: PathBuf, problem: String, label: Option<Stri
         }
     }
 
+    // Direct verification: if any node already has lean content from the initial
+    // response, try verifying it immediately. If it passes, we're done -- no need
+    // for the autonomous loop at all.
+    {
+        let session = state.current_session().cloned().unwrap();
+        let nodes_with_content: Vec<_> = session.proof.nodes.iter()
+            .filter(|n| !n.content.trim().is_empty())
+            .cloned()
+            .collect();
+        if !nodes_with_content.is_empty() {
+            eprintln!("[run] Found {} node(s) with lean content, verifying directly...", nodes_with_content.len());
+            let project_dir = resolve_lean_project_dir();
+            for node in &nodes_with_content {
+                eprintln!("[run] Verifying node: {} ({} chars)", node.label, node.content.len());
+                let session_for_verify = session.clone();
+                let pd = project_dir.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    verify_active_node(&pd, &session_for_verify)
+                }).await.ok().and_then(|r| r.ok());
+
+                if let Some(result) = result {
+                    if result.ok {
+                        eprintln!("[run] *** DIRECT VERIFICATION SUCCEEDED for {} ***", node.label);
+                        // Record in corpus
+                        let sr = store.clone();
+                        let ss = session.clone();
+                        let rr = result.clone();
+                        let _ = tokio::task::spawn_blocking(move || sr.record_verification_result(&ss, &rr)).await;
+
+                        // Update node status
+                        if let Some(s) = state.current_session_mut() {
+                            if let Some(n) = s.proof.nodes.iter_mut().find(|n| n.id == node.id) {
+                                n.status = openproof_protocol::ProofNodeStatus::Verified;
+                            }
+                            s.proof.phase = "done".to_string();
+                            s.proof.status_line = format!("Verified: {}", node.label);
+                        }
+                        if let Some(session) = state.current_session().cloned() {
+                            let s = store.clone();
+                            let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
+                        }
+
+                        // Print and exit -- no autonomous loop needed
+                        let session = state.current_session().cloned().unwrap();
+                        eprintln!("\n[run] === Summary (direct verification) ===");
+                        eprintln!("[run] Session: {} ({})", session.title, session.id);
+                        eprintln!("[run] Phase: {}", session.proof.phase);
+                        eprintln!("[run] Verified: {} :: {}", node.label, node.statement);
+                        eprintln!("{}", node.content);
+                        let corpus = store.get_corpus_summary()?;
+                        eprintln!("[run] Corpus: verified={}, user_verified={}, attempts={}",
+                            corpus.verified_entry_count, corpus.user_verified_count, corpus.attempt_log_count);
+                        return Ok(());
+                    } else {
+                        eprintln!("[run] Direct verification failed for {}:", node.label);
+                        for line in result.stderr.lines().take(5) {
+                            eprintln!("[run]   {line}");
+                        }
+                        // Record the attempt
+                        let sr = store.clone();
+                        let ss = session.clone();
+                        let rr = result.clone();
+                        let _ = tokio::task::spawn_blocking(move || sr.record_verification_result(&ss, &rr)).await;
+                    }
+                }
+            }
+            eprintln!("[run] Direct verification did not succeed. Falling through to autonomous loop.");
+        }
+    }
+
     // Start autonomous
     eprintln!("\n[run] === Starting autonomous loop ===\n");
     if let Ok(write) = state.set_autonomous_run_state(AutonomousRunPatch {

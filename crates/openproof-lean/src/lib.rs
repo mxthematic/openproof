@@ -85,6 +85,14 @@ pub fn verify_node(
 }
 
 pub fn render_node_scratch(session: &SessionSnapshot, node: &ProofNode) -> String {
+    let content = node.content.trim();
+
+    // If the content already has import statements, it's a self-contained Lean file.
+    // Use it as-is to avoid duplicate imports.
+    if content.starts_with("import ") {
+        return content.to_string();
+    }
+
     let imports = if session.proof.imports.is_empty() {
         vec!["Mathlib".to_string()]
     } else {
@@ -95,17 +103,9 @@ pub fn render_node_scratch(session: &SessionSnapshot, node: &ProofNode) -> Strin
         lines.push(format!("import {import}"));
     }
     lines.push(String::new());
-    lines.push("/-!".to_string());
-    lines.push(format!("OpenProof scratch session: {}", escape_comment(&session.title)));
-    lines.push(format!("Session id: {}", escape_comment(&session.id)));
-    lines.push(format!("Target: {}", escape_comment(&node.label)));
-    lines.push(format!("Statement: {}", escape_comment(&node.statement)));
-    lines.push("-/".to_string());
+    lines.push(format!("-- openproof: {} :: {}", escape_comment(&node.label), escape_comment(&node.statement)));
     lines.push(String::new());
-    lines.push(format!("-- node id: {}", escape_comment(&node.id)));
-    lines.push(format!("-- kind: {:?}", node.kind));
-    lines.push(String::new());
-    lines.push(node.content.trim().to_string());
+    lines.push(content.to_string());
     lines.join("\n")
 }
 
