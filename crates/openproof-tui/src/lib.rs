@@ -1,17 +1,16 @@
+pub mod custom_terminal;
 pub mod markdown;
 
 use openproof_core::{AppState, Overlay};
 use ratatui::{
-    buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
-    Frame,
 };
 
-/// Draw the full TUI frame: chat area / input / status bar.
-pub fn draw(frame: &mut Frame<'_>, state: &mut AppState) {
+/// Draw using the custom inline-viewport Frame.
+pub fn draw(frame: &mut custom_terminal::Frame<'_>, state: &mut AppState) {
     let area = frame.area();
 
     let prefix_len = 2; // "> "
@@ -52,7 +51,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut AppState) {
 // Chat area (scrollable transcript)
 // ---------------------------------------------------------------------------
 
-fn draw_chat_area(f: &mut Frame<'_>, state: &mut AppState, area: Rect) {
+fn draw_chat_area(f: &mut custom_terminal::Frame<'_>, state: &mut AppState, area: Rect) {
     let transcript_lines = state
         .current_session()
         .map(|session| {
@@ -161,81 +160,17 @@ fn draw_chat_area(f: &mut Frame<'_>, state: &mut AppState, area: Rect) {
         .scroll((scroll_from_top as u16, 0))
         .wrap(Wrap { trim: false });
     f.render_widget(para, area);
-
-    // Smooth scrollbar (half-block characters for 2x resolution)
-    if total_visual > state.visible_height {
-        let show = state
-            .last_scroll_at
-            .map(|t| t.elapsed().as_millis() < 1500)
-            .unwrap_or(false);
-        if show {
-            draw_smooth_scrollbar(f.buffer_mut(), area, scroll_from_top, max_scroll);
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
 // Smooth scrollbar (half-block rendering for 2x vertical resolution)
 // ---------------------------------------------------------------------------
 
-/// Render a scrollbar on the rightmost column of `area` using half-block
-/// characters for sub-cell precision. `position` is the current scroll-from-top
-/// value and `max_position` is the maximum scroll-from-top value.
-fn draw_smooth_scrollbar(buf: &mut Buffer, area: Rect, position: usize, max_position: usize) {
-    if area.height < 2 || area.width == 0 || max_position == 0 {
-        return;
-    }
-    let col = area.x + area.width - 1;
-    let height = area.height as usize;
-    let half_cells = height * 2;
-
-    // Thumb size proportional to viewport/content ratio, minimum 3 half-cells.
-    let thumb_size = ((height as f64 / (height as f64 + max_position as f64)) * half_cells as f64)
-        .round()
-        .max(3.0) as usize;
-    let thumb_size = thumb_size.min(half_cells);
-
-    let track_range = half_cells.saturating_sub(thumb_size);
-    let thumb_start = if max_position > 0 {
-        (position as f64 / max_position as f64 * track_range as f64).round() as usize
-    } else {
-        0
-    };
-    let thumb_end = thumb_start + thumb_size;
-
-    let color = Color::Rgb(100, 100, 100);
-
-    for row in 0..height {
-        let top_half = row * 2;
-        let bot_half = row * 2 + 1;
-        let top_in = top_half >= thumb_start && top_half < thumb_end;
-        let bot_in = bot_half >= thumb_start && bot_half < thumb_end;
-
-        let cell = &mut buf[(col, area.y + row as u16)];
-        match (top_in, bot_in) {
-            (true, true) => {
-                // Use background fill to avoid the gap between full-block glyphs.
-                cell.set_symbol(" ");
-                cell.set_style(Style::default().bg(color));
-            }
-            (true, false) => {
-                cell.set_symbol("\u{2580}"); // ▀
-                cell.set_style(Style::default().fg(color));
-            }
-            (false, true) => {
-                cell.set_symbol("\u{2584}"); // ▄
-                cell.set_style(Style::default().fg(color));
-            }
-            (false, false) => {} // don't touch -- keep content visible
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Composer (input area)
 // ---------------------------------------------------------------------------
 
-fn draw_input_area(f: &mut Frame<'_>, state: &AppState, area: Rect) {
+fn draw_input_area(f: &mut custom_terminal::Frame<'_>, state: &AppState, area: Rect) {
     let mut spans = vec![Span::styled(
         "> ".to_string(),
         Style::default()
@@ -270,7 +205,7 @@ fn draw_input_area(f: &mut Frame<'_>, state: &AppState, area: Rect) {
 // Status bar
 // ---------------------------------------------------------------------------
 
-fn draw_status_bar(f: &mut Frame<'_>, state: &AppState, area: Rect) {
+fn draw_status_bar(f: &mut custom_terminal::Frame<'_>, state: &AppState, area: Rect) {
     let text = if state.turn_in_flight || state.verification_in_flight {
         let activity = match (state.turn_in_flight, state.verification_in_flight) {
             (true, true) => "working + verifying...",
@@ -294,7 +229,7 @@ fn draw_status_bar(f: &mut Frame<'_>, state: &AppState, area: Rect) {
 // Command bar (/ mode)
 // ---------------------------------------------------------------------------
 
-fn draw_command_bar(f: &mut Frame<'_>, state: &AppState, area: Rect) {
+fn draw_command_bar(f: &mut custom_terminal::Frame<'_>, state: &AppState, area: Rect) {
     let mut spans = vec![Span::styled(
         "/".to_string(),
         Style::default()
@@ -309,7 +244,7 @@ fn draw_command_bar(f: &mut Frame<'_>, state: &AppState, area: Rect) {
     f.render_widget(para, area);
 }
 
-fn draw_completion_popup(f: &mut Frame<'_>, state: &AppState, cmd_area: Rect) {
+fn draw_completion_popup(f: &mut custom_terminal::Frame<'_>, state: &AppState, cmd_area: Rect) {
     let completions = &state.command_completions;
     let max_show = completions.len().min(8);
     if max_show == 0 {
@@ -357,7 +292,7 @@ fn draw_completion_popup(f: &mut Frame<'_>, state: &AppState, cmd_area: Rect) {
 // Overlays
 // ---------------------------------------------------------------------------
 
-fn draw_overlay(f: &mut Frame<'_>, state: &AppState, overlay: &Overlay, area: Rect) {
+fn draw_overlay(f: &mut custom_terminal::Frame<'_>, state: &AppState, overlay: &Overlay, area: Rect) {
     match overlay {
         Overlay::SessionPicker { selected } => draw_session_picker(f, state, *selected, area),
         Overlay::FocusPicker { items, selected } => {
@@ -366,7 +301,7 @@ fn draw_overlay(f: &mut Frame<'_>, state: &AppState, overlay: &Overlay, area: Re
     }
 }
 
-fn draw_session_picker(f: &mut Frame<'_>, state: &AppState, selected: usize, area: Rect) {
+fn draw_session_picker(f: &mut custom_terminal::Frame<'_>, state: &AppState, selected: usize, area: Rect) {
     let popup = centered_rect(75, 60, area);
     f.render_widget(Clear, popup);
 
@@ -447,7 +382,7 @@ fn draw_session_picker(f: &mut Frame<'_>, state: &AppState, selected: usize, are
 }
 
 fn draw_focus_picker(
-    f: &mut Frame<'_>,
+    f: &mut custom_terminal::Frame<'_>,
     items: &[(String, String, String)],
     selected: usize,
     area: Rect,
@@ -594,7 +529,7 @@ fn cursor_visual_row(text: &str, cursor: usize, prefix_len: usize, width: usize)
 // Question modal (unchanged domain logic)
 // ---------------------------------------------------------------------------
 
-fn render_question_modal(frame: &mut Frame<'_>, state: &AppState) {
+fn render_question_modal(frame: &mut custom_terminal::Frame<'_>, state: &AppState) {
     let Some(question) = state.pending_question() else {
         return;
     };

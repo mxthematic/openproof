@@ -143,7 +143,6 @@ pub struct AppState {
     pub command_completions: Vec<String>,
     pub completion_idx: Option<usize>,
     pub overlay: Option<Overlay>,
-    pub last_scroll_at: Option<std::time::Instant>,
 }
 
 impl AppState {
@@ -186,7 +185,6 @@ impl AppState {
             command_completions: Vec::new(),
             completion_idx: None,
             overlay: None,
-            last_scroll_at: None,
         }
     }
 
@@ -2028,29 +2026,29 @@ impl AppState {
             AppEvent::ScrollTranscriptUp => {
                 let max = self.total_visual_lines.saturating_sub(self.visible_height);
                 self.scroll_offset = (self.scroll_offset + 1).min(max);
-                self.last_scroll_at = Some(std::time::Instant::now());
+
             }
             AppEvent::ScrollTranscriptDown => {
                 self.scroll_offset = self.scroll_offset.saturating_sub(1);
-                self.last_scroll_at = Some(std::time::Instant::now());
+
             }
             AppEvent::ScrollPageUp => {
                 let max = self.total_visual_lines.saturating_sub(self.visible_height);
                 self.scroll_offset = (self.scroll_offset + 20).min(max);
-                self.last_scroll_at = Some(std::time::Instant::now());
+
             }
             AppEvent::ScrollPageDown => {
                 self.scroll_offset = self.scroll_offset.saturating_sub(20);
-                self.last_scroll_at = Some(std::time::Instant::now());
+
             }
             AppEvent::ScrollToTop => {
                 let max = self.total_visual_lines.saturating_sub(self.visible_height);
                 self.scroll_offset = max;
-                self.last_scroll_at = Some(std::time::Instant::now());
+
             }
             AppEvent::ScrollToBottom => {
                 self.scroll_offset = 0;
-                self.last_scroll_at = Some(std::time::Instant::now());
+
             }
             AppEvent::AuthLoaded(auth) => {
                 self.auth = auth;

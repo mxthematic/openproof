@@ -6,5 +6,7 @@ license.workspace = true
 
 [dependencies]
 ratatui.workspace = true
+crossterm.workspace = true
+unicode-width = "0.2"
 openproof-core = { path = "../openproof-core" }
 openproof-protocol = { path = "../openproof-protocol" }

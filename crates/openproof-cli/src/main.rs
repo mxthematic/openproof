@@ -1,8 +1,7 @@
 use anyhow::{bail, Result};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{disable_raw_mode, enable_raw_mode},
 };
 use directories::BaseDirs;
 use openproof_core::{AppEvent, AppState, AutonomousRunPatch, FocusPane, SubmittedInput};
@@ -16,7 +15,7 @@ use openproof_protocol::{
     SessionSnapshot, ShareMode, TranscriptEntry,
 };
 use openproof_store::{AppStore, StorePaths};
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::backend::CrosstermBackend;
 use std::{
     env, fs, io,
     path::{Path, PathBuf},
@@ -657,34 +656,25 @@ async fn run_shell(launch_cwd: PathBuf) -> Result<()> {
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
-        let _ = crossterm::execute!(
-            io::stderr(),
-            crossterm::event::DisableMouseCapture,
-            LeaveAlternateScreen,
-            crossterm::cursor::Show,
-        );
+        let _ = crossterm::execute!(io::stderr(), crossterm::cursor::Show);
         original_hook(info);
     }));
 
     enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    // Clear scrollback before entering alternate screen.
-    execute!(
-        stdout,
-        crossterm::style::Print("\x1b[r\x1b[0m\x1b[H\x1b[2J\x1b[3J\x1b[H"),
-        EnterAlternateScreen,
-        crossterm::event::EnableMouseCapture,
-    )?;
+    let stdout = io::stdout();
     let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    let mut terminal =
+        openproof_tui::custom_terminal::CustomTerminal::with_options(backend)?;
+    // Fill the terminal from the cursor position downward.
+    let size = terminal.size()?;
+    let cursor_y = terminal.last_known_cursor_pos.y;
+    let height = size.height.saturating_sub(cursor_y);
+    terminal.set_viewport_area(ratatui::layout::Rect::new(0, cursor_y, size.width, height));
     let app_result = run_app(&mut terminal, store, &mut state, tx, &mut rx).await;
     disable_raw_mode()?;
-    crossterm::execute!(
-        terminal.backend_mut(),
-        crossterm::event::DisableMouseCapture,
-        LeaveAlternateScreen,
-    )?;
     terminal.show_cursor()?;
+    // Clear the viewport area so the shell prompt starts clean.
+    terminal.clear()?;
     let _ = std::panic::take_hook();
     app_result
 }
@@ -706,7 +696,7 @@ async fn build_health_report(launch_cwd: PathBuf) -> Result<HealthReport> {
 }
 
 async fn run_app(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    terminal: &mut openproof_tui::custom_terminal::CustomTerminal<CrosstermBackend<io::Stdout>>,
     store: AppStore,
     state: &mut AppState,
     tx: mpsc::UnboundedSender<AppEvent>,
@@ -949,33 +939,13 @@ async fn run_app(
                     }
                 }
                 Event::Mouse(mouse) => {
-                    use crossterm::event::{MouseButton, MouseEventKind};
+                    use crossterm::event::MouseEventKind;
                     match mouse.kind {
                         MouseEventKind::ScrollUp => {
                             let _ = state.apply(AppEvent::ScrollTranscriptUp);
                         }
                         MouseEventKind::ScrollDown => {
                             let _ = state.apply(AppEvent::ScrollTranscriptDown);
-                        }
-                        MouseEventKind::Down(MouseButton::Left)
-                        | MouseEventKind::Drag(MouseButton::Left) => {
-                            // Click/drag on rightmost column: jump scroll position.
-                            let term_width = terminal.size()?.width;
-                            if mouse.column + 1 >= term_width && state.visible_height > 0 {
-                                let max = state
-                                    .total_visual_lines
-                                    .saturating_sub(state.visible_height);
-                                if max > 0 {
-                                    let ratio =
-                                        mouse.row as f64 / state.visible_height as f64;
-                                    let scroll_from_top =
-                                        (ratio * max as f64).round() as usize;
-                                    state.scroll_offset =
-                                        max.saturating_sub(scroll_from_top);
-                                    state.last_scroll_at =
-                                        Some(std::time::Instant::now());
-                                }
-                            }
                         }
                         _ => {}
                     }

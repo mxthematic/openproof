@@ -1106,9 +1106,11 @@ dependencies = [
 name = "openproof-tui"
 version = "0.1.0"
 dependencies = [
+ "crossterm",
  "openproof-core",
  "openproof-protocol",
  "ratatui",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]
