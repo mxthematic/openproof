@@ -265,9 +265,9 @@ fn handle_normal_mode_key(
         }
         KeyCode::Up if state.has_open_question() => Some(AppEvent::SelectPrevQuestionOption),
         KeyCode::Down if state.has_open_question() => Some(AppEvent::SelectNextQuestionOption),
-        KeyCode::Up if !state.composer.is_empty() || state.history_index.is_some() => {
-            // Browse input history backward.
+        KeyCode::Up => {
             if !state.input_history.is_empty() {
+                // Browse input history backward (shell-style).
                 if state.history_index.is_none() {
                     state.input_draft = state.composer.clone();
                 }
@@ -279,35 +279,33 @@ fn handle_normal_mode_key(
                 state.history_index = Some(idx);
                 state.composer = state.input_history[idx].clone();
                 state.composer_cursor = state.composer.len();
+                None
+            } else {
+                Some(AppEvent::ScrollTranscriptUp)
             }
-            None
         }
-        KeyCode::Down if state.history_index.is_some() => {
-            // Browse input history forward.
-            match state.history_index {
-                Some(i) if i + 1 < state.input_history.len() => {
-                    state.history_index = Some(i + 1);
-                    state.composer = state.input_history[i + 1].clone();
-                    state.composer_cursor = state.composer.len();
+        KeyCode::Down => {
+            if state.history_index.is_some() {
+                // Browse input history forward.
+                match state.history_index {
+                    Some(i) if i + 1 < state.input_history.len() => {
+                        state.history_index = Some(i + 1);
+                        state.composer = state.input_history[i + 1].clone();
+                        state.composer_cursor = state.composer.len();
+                    }
+                    Some(_) => {
+                        state.history_index = None;
+                        state.composer = state.input_draft.clone();
+                        state.composer_cursor = state.composer.len();
+                        state.input_draft.clear();
+                    }
+                    None => {}
                 }
-                Some(_) => {
-                    state.history_index = None;
-                    state.composer = state.input_draft.clone();
-                    state.composer_cursor = state.composer.len();
-                    state.input_draft.clear();
-                }
-                None => {}
+                None
+            } else {
+                Some(AppEvent::ScrollTranscriptDown)
             }
-            None
         }
-        KeyCode::Up => Some(match state.focus {
-            FocusPane::Sessions => AppEvent::SelectPrevSession,
-            _ => AppEvent::ScrollTranscriptUp,
-        }),
-        KeyCode::Down => Some(match state.focus {
-            FocusPane::Sessions => AppEvent::SelectNextSession,
-            _ => AppEvent::ScrollTranscriptDown,
-        }),
         KeyCode::PageUp => Some(AppEvent::ScrollPageUp),
         KeyCode::PageDown => Some(AppEvent::ScrollPageDown),
         KeyCode::Left => Some(AppEvent::CursorLeft),
