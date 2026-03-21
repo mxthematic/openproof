@@ -376,6 +376,23 @@ async fn run_autonomous(launch_cwd: PathBuf, problem: String, label: Option<Stri
         let _ = state.add_proof_node(ProofNodeKind::Theorem, &title, &problem);
     }
 
+    // If we have a node but no accepted target, auto-accept so autonomous can proceed
+    let session = state.current_session().cloned().unwrap();
+    if session.proof.accepted_target.is_none() {
+        let target = session.proof.formal_target.clone()
+            .or_else(|| session.proof.nodes.first().map(|n| n.statement.clone()))
+            .unwrap_or_else(|| problem.clone());
+        eprintln!("[run] Auto-accepting target: {}", target.chars().take(100).collect::<String>());
+        if let Some(s) = state.current_session_mut() {
+            s.proof.accepted_target = Some(target);
+            s.proof.phase = "proving".to_string();
+        }
+        if let Some(session) = state.current_session().cloned() {
+            let s = store.clone();
+            let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
+        }
+    }
+
     // Start autonomous
     eprintln!("\n[run] === Starting autonomous loop ===\n");
     if let Ok(write) = state.set_autonomous_run_state(AutonomousRunPatch {
@@ -587,15 +604,33 @@ async fn run_shell(launch_cwd: PathBuf) -> Result<()> {
         });
     }
 
+    // Install panic hook to restore terminal on crash.
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = disable_raw_mode();
+        let _ = crossterm::execute!(
+            io::stderr(),
+            LeaveAlternateScreen,
+            crossterm::cursor::Show,
+        );
+        original_hook(info);
+    }));
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    // Clear scrollback before entering alternate screen.
+    execute!(
+        stdout,
+        crossterm::style::Print("\x1b[r\x1b[0m\x1b[H\x1b[2J\x1b[3J\x1b[H"),
+        EnterAlternateScreen,
+    )?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     let app_result = run_app(&mut terminal, store, &mut state, tx, &mut rx).await;
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
+    let _ = std::panic::take_hook();
     app_result
 }
 
@@ -735,49 +770,83 @@ async fn run_app(
         }
 
         if event::poll(Duration::from_millis(16))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind != KeyEventKind::Press {
-                    continue;
-                }
-                let next_event = match key.code {
-                    KeyCode::Char('q') if key.modifiers.is_empty() => Some(AppEvent::Quit),
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        Some(AppEvent::Quit)
-                    }
-                    KeyCode::Tab => Some(AppEvent::FocusNext),
-                    KeyCode::Up if state.has_open_question() => Some(AppEvent::SelectPrevQuestionOption),
-                    KeyCode::Down if state.has_open_question() => Some(AppEvent::SelectNextQuestionOption),
-                    KeyCode::Up => Some(match state.focus {
-                        FocusPane::Sessions => AppEvent::SelectPrevSession,
-                        _ => AppEvent::ScrollTranscriptUp,
-                    }),
-                    KeyCode::Down => Some(match state.focus {
-                        FocusPane::Sessions => AppEvent::SelectNextSession,
-                        _ => AppEvent::ScrollTranscriptDown,
-                    }),
-                    KeyCode::PageUp => Some(AppEvent::ScrollTranscriptUp),
-                    KeyCode::PageDown => Some(AppEvent::ScrollTranscriptDown),
-                    KeyCode::Backspace => Some(AppEvent::Backspace),
-                    KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        Some(AppEvent::InputChar(ch))
-                    }
-                    _ => None,
-                };
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    let next_event = match key.code {
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            Some(AppEvent::Quit)
+                        }
+                        KeyCode::Tab => Some(AppEvent::FocusNext),
+                        KeyCode::Up if state.has_open_question() => {
+                            Some(AppEvent::SelectPrevQuestionOption)
+                        }
+                        KeyCode::Down if state.has_open_question() => {
+                            Some(AppEvent::SelectNextQuestionOption)
+                        }
+                        KeyCode::Up => Some(match state.focus {
+                            FocusPane::Sessions => AppEvent::SelectPrevSession,
+                            _ => AppEvent::ScrollTranscriptUp,
+                        }),
+                        KeyCode::Down => Some(match state.focus {
+                            FocusPane::Sessions => AppEvent::SelectNextSession,
+                            _ => AppEvent::ScrollTranscriptDown,
+                        }),
+                        KeyCode::PageUp => Some(AppEvent::ScrollTranscriptUp),
+                        KeyCode::PageDown => Some(AppEvent::ScrollTranscriptDown),
+                        // Cursor movement
+                        KeyCode::Left => Some(AppEvent::CursorLeft),
+                        KeyCode::Right => Some(AppEvent::CursorRight),
+                        KeyCode::Home => Some(AppEvent::CursorHome),
+                        KeyCode::End => Some(AppEvent::CursorEnd),
+                        KeyCode::Delete => Some(AppEvent::DeleteForward),
+                        KeyCode::Backspace => Some(AppEvent::Backspace),
+                        // Ctrl shortcuts
+                        KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            Some(AppEvent::CursorHome)
+                        }
+                        KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            Some(AppEvent::CursorEnd)
+                        }
+                        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            Some(AppEvent::ClearToStart)
+                        }
+                        KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            Some(AppEvent::DeleteWordBackward)
+                        }
+                        // Character input
+                        KeyCode::Char(ch)
+                            if !key.modifiers.contains(KeyModifiers::CONTROL) =>
+                        {
+                            Some(AppEvent::InputChar(ch))
+                        }
+                        _ => None,
+                    };
 
-                if let Some(next_event) = next_event {
-                    if let Some(write) = state.apply(next_event) {
+                    if let Some(next_event) = next_event {
+                        if let Some(write) = state.apply(next_event) {
+                            persist_write(tx.clone(), store.clone(), write);
+                        }
+                    } else if matches!(key.code, KeyCode::Enter) {
+                        if state.has_open_question() && state.composer.trim().is_empty() {
+                            submit_selected_question_option(tx.clone(), store.clone(), state);
+                        } else if let Some(submission) = state.submit_composer() {
+                            persist_write(
+                                tx.clone(),
+                                store.clone(),
+                                openproof_core::PendingWrite {
+                                    session: submission.session_snapshot.clone(),
+                                },
+                            );
+                            handle_submission(tx.clone(), store.clone(), state, submission);
+                        }
+                    }
+                }
+                Event::Paste(text) => {
+                    if let Some(write) = state.apply(AppEvent::Paste(text)) {
                         persist_write(tx.clone(), store.clone(), write);
                     }
-                } else if matches!(key.code, KeyCode::Enter) {
-                    if state.has_open_question() && state.composer.trim().is_empty() {
-                        submit_selected_question_option(tx.clone(), store.clone(), state);
-                    } else if let Some(submission) = state.submit_composer() {
-                        persist_write(tx.clone(), store.clone(), openproof_core::PendingWrite {
-                            session: submission.session_snapshot.clone(),
-                        });
-                        handle_submission(tx.clone(), store.clone(), state, submission);
-                    }
                 }
+                _ => {}
             }
         }
     }

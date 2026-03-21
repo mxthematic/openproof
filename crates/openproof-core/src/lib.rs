@@ -50,6 +50,14 @@ pub struct AutonomousRunPatch {
 pub enum AppEvent {
     InputChar(char),
     Backspace,
+    CursorLeft,
+    CursorRight,
+    CursorHome,
+    CursorEnd,
+    DeleteForward,
+    DeleteWordBackward,
+    ClearToStart,
+    Paste(String),
     TurnStarted,
     TurnFinished,
     LeanVerifyStarted,
@@ -94,7 +102,10 @@ pub struct AppState {
     pub workspace_label: Option<String>,
     pub focus: FocusPane,
     pub composer: String,
-    pub transcript_scroll: u16,
+    pub composer_cursor: usize,
+    pub scroll_offset: usize,
+    pub total_visual_lines: usize,
+    pub visible_height: usize,
     pub show_proof_pane: bool,
     pub selected_question_option: usize,
     pub status: String,
@@ -104,6 +115,7 @@ pub struct AppState {
     pub pending_writes: usize,
     pub turn_in_flight: bool,
     pub verification_in_flight: bool,
+    pub turn_started_at: Option<std::time::Instant>,
 }
 
 impl AppState {
@@ -126,7 +138,10 @@ impl AppState {
             workspace_label,
             focus: FocusPane::Composer,
             composer: String::new(),
-            transcript_scroll: 0,
+            composer_cursor: 0,
+            scroll_offset: 0,
+            total_visual_lines: 0,
+            visible_height: 0,
             show_proof_pane: false,
             selected_question_option: 0,
             status,
@@ -136,6 +151,7 @@ impl AppState {
             pending_writes: 0,
             turn_in_flight: false,
             verification_in_flight: false,
+            turn_started_at: None,
         }
     }
 
@@ -197,6 +213,7 @@ impl AppState {
     pub fn submit_composer(&mut self) -> Option<SubmittedInput> {
         let text = self.composer.trim().to_string();
         self.composer.clear();
+        self.composer_cursor = 0;
         self.submit_text(text)
     }
 
@@ -716,7 +733,7 @@ impl AppState {
         }
         self.sessions.insert(0, session.clone());
         self.selected_session = 0;
-        self.transcript_scroll = 0;
+        self.scroll_offset = 0;
         self.selected_question_option = 0;
         self.pending_writes += 1;
         self.status = format!("Started session {}.", session.title);
@@ -728,7 +745,7 @@ impl AppState {
             return Err(format!("Session not found: {session_id}"));
         };
         self.selected_session = index;
-        self.transcript_scroll = 0;
+        self.scroll_offset = 0;
         self.sync_question_selection();
         let title = self.sessions[index].title.clone();
         self.status = format!("Resumed {title}.");
@@ -1228,20 +1245,84 @@ impl AppState {
         match event {
             AppEvent::InputChar(ch) => {
                 if self.focus == FocusPane::Composer {
-                    self.composer.push(ch);
+                    self.composer.insert(self.composer_cursor, ch);
+                    self.composer_cursor += ch.len_utf8();
                 }
             }
             AppEvent::Backspace => {
+                if self.focus == FocusPane::Composer && self.composer_cursor > 0 {
+                    let prev = self.composer[..self.composer_cursor]
+                        .char_indices()
+                        .next_back()
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                    self.composer.remove(prev);
+                    self.composer_cursor = prev;
+                }
+            }
+            AppEvent::CursorLeft => {
+                if self.focus == FocusPane::Composer && self.composer_cursor > 0 {
+                    self.composer_cursor = self.composer[..self.composer_cursor]
+                        .char_indices()
+                        .next_back()
+                        .map(|(i, _)| i)
+                        .unwrap_or(0);
+                }
+            }
+            AppEvent::CursorRight => {
+                if self.focus == FocusPane::Composer && self.composer_cursor < self.composer.len() {
+                    self.composer_cursor = self.composer[self.composer_cursor..]
+                        .char_indices()
+                        .nth(1)
+                        .map(|(i, _)| self.composer_cursor + i)
+                        .unwrap_or(self.composer.len());
+                }
+            }
+            AppEvent::CursorHome => {
                 if self.focus == FocusPane::Composer {
-                    self.composer.pop();
+                    self.composer_cursor = 0;
+                }
+            }
+            AppEvent::CursorEnd => {
+                if self.focus == FocusPane::Composer {
+                    self.composer_cursor = self.composer.len();
+                }
+            }
+            AppEvent::DeleteForward => {
+                if self.focus == FocusPane::Composer
+                    && self.composer_cursor < self.composer.len()
+                {
+                    self.composer.remove(self.composer_cursor);
+                }
+            }
+            AppEvent::DeleteWordBackward => {
+                if self.focus == FocusPane::Composer && self.composer_cursor > 0 {
+                    let new_pos =
+                        delete_word_backward_pos(&self.composer, self.composer_cursor);
+                    self.composer.drain(new_pos..self.composer_cursor);
+                    self.composer_cursor = new_pos;
+                }
+            }
+            AppEvent::ClearToStart => {
+                if self.focus == FocusPane::Composer {
+                    self.composer.drain(..self.composer_cursor);
+                    self.composer_cursor = 0;
+                }
+            }
+            AppEvent::Paste(text) => {
+                if self.focus == FocusPane::Composer {
+                    self.composer.insert_str(self.composer_cursor, &text);
+                    self.composer_cursor += text.len();
                 }
             }
             AppEvent::TurnStarted => {
                 self.turn_in_flight = true;
+                self.turn_started_at = Some(std::time::Instant::now());
                 self.status = "Running assistant turn in the background.".to_string();
             }
             AppEvent::TurnFinished => {
                 self.turn_in_flight = false;
+                self.turn_started_at = None;
                 if !self.verification_in_flight {
                     self.status = "Assistant turn finished.".to_string();
                 }
@@ -1898,22 +1979,23 @@ impl AppState {
             AppEvent::SelectPrevSession => {
                 if self.selected_session > 0 {
                     self.selected_session -= 1;
-                    self.transcript_scroll = 0;
+                    self.scroll_offset = 0;
                     self.sync_question_selection();
                 }
             }
             AppEvent::SelectNextSession => {
                 if self.selected_session + 1 < self.sessions.len() {
                     self.selected_session += 1;
-                    self.transcript_scroll = 0;
+                    self.scroll_offset = 0;
                     self.sync_question_selection();
                 }
             }
             AppEvent::ScrollTranscriptUp => {
-                self.transcript_scroll = self.transcript_scroll.saturating_sub(1);
+                let max = self.total_visual_lines.saturating_sub(self.visible_height);
+                self.scroll_offset = (self.scroll_offset + 1).min(max);
             }
             AppEvent::ScrollTranscriptDown => {
-                self.transcript_scroll = self.transcript_scroll.saturating_add(1);
+                self.scroll_offset = self.scroll_offset.saturating_sub(1);
             }
             AppEvent::AuthLoaded(auth) => {
                 self.auth = auth;
@@ -1943,6 +2025,21 @@ impl AppState {
         }
         None
     }
+}
+
+/// Find the byte position after deleting one word backward from `cursor`.
+///
+/// Skips trailing whitespace, then skips the word, returning the byte offset
+/// of the start of the word. Used for Ctrl+W / Alt+Backspace handling.
+pub fn delete_word_backward_pos(text: &str, cursor: usize) -> usize {
+    text[..cursor]
+        .char_indices()
+        .rev()
+        .skip_while(|(_, c)| c.is_whitespace())
+        .skip_while(|(_, c)| !c.is_whitespace())
+        .map(|(i, c)| i + c.len_utf8())
+        .next()
+        .unwrap_or(0)
 }
 
 fn default_session_with_workspace(
