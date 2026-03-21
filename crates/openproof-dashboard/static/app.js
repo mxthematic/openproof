@@ -273,9 +273,11 @@ const nodeTypes = {
 function GraphTab({ session }) {
   const proof = session?.proof;
   const proofNodes = proof?.nodes || [];
-  const branches = proof?.branches || [];
+  const allBranches = proof?.branches || [];
+  const [showBranches, setShowBranches] = useState(false);
+  const branches = showBranches ? allBranches : [];
 
-  if (proofNodes.length === 0 && branches.length === 0) {
+  if (proofNodes.length === 0 && allBranches.length === 0) {
     return h`<div className="graph-container">No proof nodes to visualize</div>`;
   }
 
@@ -394,9 +396,13 @@ function GraphTab({ session }) {
     <div className="graph-canvas" style=${{ height: "100%", minHeight: 400 }}>
       <div className="graph-info">
         <span>Phase: <strong>${proof?.phase || "idle"}</strong></span>
-        <span>\u00a0\u00b7\u00a0 Nodes: ${proofNodes.length}</span>
-        <span>\u00a0\u00b7\u00a0 Branches: ${branches.length}</span>
+        <span>\u00a0\u00b7\u00a0 Proof nodes: ${proofNodes.length}</span>
         <span>\u00a0\u00b7\u00a0 Attempts: ${attemptNum}</span>
+        <button onClick=${() => setShowBranches(!showBranches)} style=${{
+          marginLeft: 12, padding: "2px 8px", fontSize: 10, cursor: "pointer",
+          background: showBranches ? "#333" : "#1a1a1a", color: "#a3a3a3",
+          border: "1px solid #333", borderRadius: 4,
+        }}>${showBranches ? "Hide" : "Show"} agent branches (${allBranches.length})</button>
         ${verification ? h`
           <span>\u00a0\u00b7\u00a0
             <span style=${{ color: verification.ok ? "#22c55e" : "#ef4444" }}>
