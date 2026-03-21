@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from "https://esm.sh/react@18.3.1";
 import { createRoot } from "https://esm.sh/react-dom@18.3.1/client";
 import htm from "https://esm.sh/htm@3.1.1";
-import { ReactFlow, Background, Controls, MiniMap, Handle, Position } from "https://esm.sh/@xyflow/react@12.6.0?deps=react@18.3.1,react-dom@18.3.1";
+import { ReactFlow, Background, Controls, MiniMap, Handle, Position, useNodesState, useEdgesState } from "https://esm.sh/@xyflow/react@12.6.0?deps=react@18.3.1,react-dom@18.3.1";
 
 const h = htm.bind(React.createElement);
 const POLL_MS = 2000;
@@ -304,7 +304,8 @@ function GraphTab({ session }) {
         id: n.id,
         type: "proofNode",
         position: { x: startX + idx * 220, y: d * 100 },
-        data: n,
+        draggable: true,
+        data: { ...n, _nodeColor: statusColor(n.status) },
       });
 
       // Parent edge
@@ -348,7 +349,8 @@ function GraphTab({ session }) {
         id: bId,
         type: "branchNode",
         position: { x: baseX + col * 160, y: branchY },
-        data: b,
+        draggable: true,
+        data: { ...b, _nodeColor: roleColor(b.role) },
       });
 
       if (focusId) {
@@ -363,6 +365,15 @@ function GraphTab({ session }) {
 
     return { flowNodes: nodes, flowEdges: edges };
   }, [proofNodes, branches]);
+
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState(flowNodes);
+  const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState(flowEdges);
+
+  // Sync when data changes from polling
+  useEffect(() => {
+    setRfNodes(flowNodes);
+    setRfEdges(flowEdges);
+  }, [flowNodes, flowEdges]);
 
   const verification = proof?.last_verification;
   const attemptNum = proof?.attempt_number || proof?.attemptNumber || 0;
@@ -384,8 +395,10 @@ function GraphTab({ session }) {
       </div>
       <div style=${{ width: "100%", height: "calc(100% - 40px)" }}>
         <${ReactFlow}
-          nodes=${flowNodes}
-          edges=${flowEdges}
+          nodes=${rfNodes}
+          edges=${rfEdges}
+          onNodesChange=${onNodesChange}
+          onEdgesChange=${onEdgesChange}
           nodeTypes=${nodeTypes}
           fitView
           fitViewOptions=${{ padding: 0.3 }}
@@ -398,7 +411,8 @@ function GraphTab({ session }) {
           <${Background} color="#222" gap=${20} />
           <${Controls} position="bottom-right" />
           <${MiniMap}
-            nodeColor=${(n) => n.type === "branchNode" ? roleColor(n.data?.role) : statusColor(n.data?.status)}
+            nodeColor=${(n) => n.data?._nodeColor || "#525252"}
+            maskColor="rgba(0,0,0,0.7)"
             style=${{ background: "#111" }}
           />
         <//>
