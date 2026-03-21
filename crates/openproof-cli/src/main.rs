@@ -189,6 +189,24 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions> {
     })
 }
 
+fn resolve_lean_project_dir() -> PathBuf {
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    if cwd.join("lakefile.lean").exists() {
+        return cwd;
+    }
+    let lean_sub = cwd.join("lean");
+    if lean_sub.join("lakefile.lean").exists() {
+        return lean_sub;
+    }
+    if let Ok(launch) = env::var("OPENPROOF_LAUNCH_CWD") {
+        let launch_lean = PathBuf::from(&launch).join("lean");
+        if launch_lean.join("lakefile.lean").exists() {
+            return launch_lean;
+        }
+    }
+    lean_sub
+}
+
 fn print_help() {
     println!(
         "\
@@ -254,7 +272,7 @@ async fn run_ask(prompt: String) -> Result<()> {
 async fn run_dashboard(launch_cwd: PathBuf, should_open: bool, port: Option<u16>) -> Result<()> {
     let store = AppStore::open(StorePaths::detect()?)?;
     let _ = launch_cwd;
-    let lean_project_dir = env::current_dir()?.join("lean");
+    let lean_project_dir = resolve_lean_project_dir();
     let server = start_dashboard_server(store, lean_project_dir, port).await?;
     let url = format!("http://127.0.0.1:{}", server.port);
     println!("openproof dashboard listening on {url}");
@@ -310,7 +328,7 @@ async fn run_autonomous(launch_cwd: PathBuf, problem: String, label: Option<Stri
         state.auth.plan.as_deref().unwrap_or("?"));
 
     // Load lean health
-    let lean_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join("lean");
+    let lean_dir = resolve_lean_project_dir();
     let lean_dir_clone = lean_dir.clone();
     if let Ok(health) = tokio::task::spawn_blocking(move || detect_lean_health(&lean_dir_clone)).await? {
         let _ = state.apply(AppEvent::LeanLoaded(health));
@@ -620,7 +638,7 @@ async fn run_shell(launch_cwd: PathBuf) -> Result<()> {
 
     {
         let tx = tx.clone();
-        let lean_project_dir = env::current_dir()?.join("lean");
+        let lean_project_dir = resolve_lean_project_dir();
         tokio::spawn(async move {
             let lean = tokio::task::spawn_blocking(move || detect_lean_health(&lean_project_dir))
                 .await
@@ -671,7 +689,7 @@ async fn build_health_report(launch_cwd: PathBuf) -> Result<HealthReport> {
     let store = AppStore::open(StorePaths::detect()?)?;
     let auth = load_auth_summary().unwrap_or_default();
     let _ = launch_cwd;
-    let lean = detect_lean_health(&env::current_dir()?.join("lean")).unwrap_or_default();
+    let lean = detect_lean_health(&resolve_lean_project_dir()).unwrap_or_default();
     let latest_session = store.latest_session()?;
     Ok(HealthReport {
         ok: lean.ok,
@@ -2672,7 +2690,7 @@ fn apply_local_command(
         "/dashboard" => {
             let store_dash = store.clone();
             let tx_dash = tx.clone();
-            let lean_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join("lean");
+            let lean_dir = resolve_lean_project_dir();
             tokio::spawn(async move {
                 match start_dashboard_server(store_dash, lean_dir, None).await {
                     Ok(server) => {
