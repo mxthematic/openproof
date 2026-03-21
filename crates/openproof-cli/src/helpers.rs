@@ -321,3 +321,30 @@ pub fn parse_statement_args(arg_text: &str) -> Option<(String, String)> {
         Some((label.to_string(), statement.to_string()))
     }
 }
+
+/// Embed a verified corpus item into the vector store (fire-and-forget).
+/// Runs in background -- does not block the caller. Silently skips if
+/// Qdrant is unavailable or OPENAI_API_KEY is not set.
+pub fn embed_verified_item(
+    identity_key: String,
+    label: String,
+    statement: String,
+    decl_kind: String,
+    module_name: String,
+    artifact_content: String,
+) {
+    tokio::spawn(async move {
+        use openproof_store::embeddings::{build_embedding_text, generate_embedding, EmbeddingStore};
+        let text = build_embedding_text(&label, &statement, &decl_kind, &module_name, &artifact_content);
+        let Some(embedding) = generate_embedding(&text).await else {
+            return; // No API key or API error -- skip silently
+        };
+        let store = match EmbeddingStore::open_remote("http://localhost:6334").await {
+            Ok(s) => s,
+            Err(_) => return, // Qdrant not running -- skip silently
+        };
+        let _ = store
+            .upsert_item(&identity_key, &label, &statement, &decl_kind, &module_name, &artifact_content, embedding)
+            .await;
+    });
+}

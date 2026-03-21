@@ -196,6 +196,8 @@ pub fn start_branch_verification(
                 let persist_session = verification_session.clone();
                 let persist_result = result.clone();
                 let persist_tx = tx.clone();
+                let embed_session = verification_session.clone();
+                let embed_ok = result.ok;
                 tokio::spawn(async move {
                     let persisted = tokio::task::spawn_blocking(move || {
                         persist_store
@@ -210,6 +212,21 @@ pub fn start_branch_verification(
                             content: "Could not persist the branch verification outcome."
                                 .to_string(),
                         });
+                    }
+                    // Embed verified items into vector store (fire-and-forget)
+                    if embed_ok {
+                        if let Some(node) = embed_session.proof.active_node_id.as_deref()
+                            .and_then(|id| embed_session.proof.nodes.iter().find(|n| n.id == id))
+                        {
+                            crate::helpers::embed_verified_item(
+                                format!("session/{}/{}", embed_session.id, node.id),
+                                node.label.clone(),
+                                node.statement.clone(),
+                                format!("{:?}", node.kind).to_lowercase(),
+                                String::new(),
+                                node.content.clone(),
+                            );
+                        }
                     }
                 });
                 let _ = tx.send(AppEvent::BranchVerifyFinished {
