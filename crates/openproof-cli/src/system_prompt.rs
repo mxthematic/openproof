@@ -258,10 +258,11 @@ pub async fn retrieval_context(store: &AppStore, session: Option<&SessionSnapsho
     }
 
     let mut sections = Vec::new();
-    if let Ok(local_hits) = store.search_verified_corpus(&query, 4) {
+    if let Ok(local_hits) = store.search_verified_corpus(&query, 6) {
         if !local_hits.is_empty() {
+            let hit_count = local_hits.len();
             sections.push(format!(
-                "Local verified corpus hits:\n{}",
+                "Verified corpus ({hit_count} relevant results):\n{}",
                 local_hits
                     .into_iter()
                     .map(|(label, statement, visibility)| {
@@ -270,6 +271,9 @@ pub async fn retrieval_context(store: &AppStore, session: Option<&SessionSnapsho
                     .collect::<Vec<_>>()
                     .join("\n")
             ));
+            sections.push(
+                "Use these verified results directly if they apply. They are proven correct.".to_string()
+            );
         }
     }
     if let Some(remote_hits) = remote_verified_hits(session, &query, 4).await {
