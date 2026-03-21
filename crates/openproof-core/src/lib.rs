@@ -1,4 +1,7 @@
 mod apply;
+mod apply_content;
+mod apply_input;
+mod apply_streaming;
 mod commands;
 mod helpers;
 mod parser;

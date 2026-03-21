@@ -1,0 +1,365 @@
+use chrono::Utc;
+use openproof_protocol::{
+    AgentStatus, BranchMessage, BranchQueueState, MessageRole, ProofNodeStatus, TranscriptEntry,
+};
+
+use crate::helpers::{agent_role_label, next_id, phase_from_role};
+use crate::parser::{derive_goal_label, extract_lean_code_block, parse_assistant_output};
+use crate::state::{AppState, PendingWrite};
+
+impl AppState {
+    pub(crate) fn apply_append_assistant(&mut self, content: String) -> Option<PendingWrite> {
+        let text = content.trim();
+        if text.is_empty() {
+            return None;
+        }
+        let parsed = parse_assistant_output(text);
+        let entry = TranscriptEntry {
+            id: next_id("native_msg"),
+            role: MessageRole::Assistant,
+            title: Some("OpenProof".to_string()),
+            content: text.to_string(),
+            created_at: Utc::now().to_rfc3339(),
+        };
+        if let Some((snapshot, status_line)) = self.current_session_mut().map(|session| {
+            session.updated_at = entry.created_at.clone();
+            session.transcript.push(entry);
+            if let Some(title) = parsed.title.as_ref().filter(|item| !item.trim().is_empty()) {
+                session.title = title.trim().to_string();
+            }
+            if let Some(problem) = parsed.problem.as_ref().filter(|item| !item.trim().is_empty()) {
+                session.proof.problem = Some(problem.trim().to_string());
+            }
+            if let Some(formal_target) = parsed
+                .formal_target
+                .as_ref()
+                .filter(|item| !item.trim().is_empty())
+            {
+                session.proof.formal_target = Some(formal_target.trim().to_string());
+            }
+            if let Some(accepted_target) = parsed
+                .accepted_target
+                .as_ref()
+                .filter(|item| !item.trim().is_empty())
+            {
+                session.proof.accepted_target = Some(accepted_target.trim().to_string());
+                session.proof.pending_question = None;
+                session.proof.awaiting_clarification = false;
+            }
+            if let Some(search_status) = parsed
+                .search_status
+                .as_ref()
+                .filter(|item| !item.trim().is_empty())
+            {
+                session.proof.search_status = Some(search_status.trim().to_string());
+            }
+            if let Some(phase) = parsed.phase.as_ref().filter(|item| !item.trim().is_empty()) {
+                session.proof.phase = phase.trim().to_string();
+            }
+            if !parsed.assumptions.is_empty() {
+                session.proof.assumptions = parsed.assumptions.clone();
+            }
+            if !parsed.paper_notes.is_empty() {
+                session.proof.paper_notes.extend(parsed.paper_notes.clone());
+            }
+            if let Some(ref tex) = parsed.paper_tex {
+                session.proof.paper_tex = tex.clone();
+            }
+            if let Some(question) = parsed.question.clone() {
+                session.proof.status_line =
+                    format!("Awaiting clarification: {}", question.prompt);
+                session.proof.phase = "formalizing".to_string();
+                session.proof.pending_question = Some(question);
+                session.proof.awaiting_clarification = true;
+            }
+            for created in &parsed.created_nodes {
+                let node = openproof_protocol::ProofNode {
+                    id: next_id("node"),
+                    kind: created.kind,
+                    label: created.label.clone(),
+                    statement: created.statement.clone(),
+                    content: String::new(),
+                    status: ProofNodeStatus::Pending,
+                    created_at: session.updated_at.clone(),
+                    updated_at: session.updated_at.clone(),
+                };
+                session.proof.active_node_id = Some(node.id.clone());
+                if session.proof.root_node_id.is_none() {
+                    session.proof.root_node_id = Some(node.id.clone());
+                }
+                session.proof.nodes.push(node);
+            }
+            if session.proof.nodes.is_empty() {
+                if let Some(target) = session
+                    .proof
+                    .accepted_target
+                    .clone()
+                    .or_else(|| session.proof.formal_target.clone())
+                {
+                    let label = derive_goal_label(
+                        parsed
+                            .title
+                            .as_deref()
+                            .or(Some(session.title.as_str()))
+                            .unwrap_or("Goal"),
+                    );
+                    let node = openproof_protocol::ProofNode {
+                        id: next_id("node"),
+                        kind: openproof_protocol::ProofNodeKind::Theorem,
+                        label,
+                        statement: target,
+                        content: String::new(),
+                        status: ProofNodeStatus::Pending,
+                        created_at: session.updated_at.clone(),
+                        updated_at: session.updated_at.clone(),
+                    };
+                    session.proof.active_node_id = Some(node.id.clone());
+                    if session.proof.root_node_id.is_none() {
+                        session.proof.root_node_id = Some(node.id.clone());
+                    }
+                    session.proof.nodes.push(node);
+                }
+            }
+            if let Some(candidate) = parsed
+                .lean_snippets
+                .first()
+                .cloned()
+                .or_else(|| extract_lean_code_block(text))
+            {
+                let active_node_id = session.proof.active_node_id.clone();
+                if let Some(node_id) = active_node_id {
+                    if let Some(node) = session
+                        .proof
+                        .nodes
+                        .iter_mut()
+                        .find(|node| node.id == node_id)
+                    {
+                        node.content = candidate;
+                        node.status = ProofNodeStatus::Proving;
+                        node.updated_at = session.updated_at.clone();
+                        session.proof.phase = "proving".to_string();
+                        session.proof.goal_summary = Some(node.statement.clone());
+                        session.proof.status_line =
+                            format!("Updated Lean candidate for {}.", node.label);
+                    }
+                }
+            } else if let Some(next_step) = parsed
+                .next_steps
+                .first()
+                .filter(|item| !item.trim().is_empty())
+            {
+                session.proof.status_line = next_step.trim().to_string();
+            }
+            (session.clone(), session.proof.status_line.clone())
+        }) {
+            self.sync_question_selection();
+            self.pending_writes += 1;
+            self.status = status_line;
+            return Some(PendingWrite { session: snapshot });
+        }
+        None
+    }
+
+    pub(crate) fn apply_append_branch_assistant(
+        &mut self,
+        branch_id: String,
+        content: String,
+    ) -> Option<PendingWrite> {
+        let text = content.trim();
+        if text.is_empty() {
+            return None;
+        }
+        let parsed = parse_assistant_output(text);
+        if let Some((snapshot, status_line)) = self.current_session_mut().map(|session| {
+            let now = Utc::now().to_rfc3339();
+            session.updated_at = now.clone();
+            let active_node_id = session.proof.active_node_id.clone();
+            if let Some(branch) = session
+                .proof
+                .branches
+                .iter_mut()
+                .find(|branch| branch.id == branch_id)
+            {
+                branch.updated_at = now.clone();
+                branch.transcript.push(BranchMessage {
+                    id: next_id("branchmsg"),
+                    role: MessageRole::Assistant,
+                    content: text.to_string(),
+                    created_at: now.clone(),
+                });
+                if let Some(search_status) = parsed
+                    .search_status
+                    .as_ref()
+                    .filter(|item| !item.trim().is_empty())
+                {
+                    branch.search_status = search_status.trim().to_string();
+                }
+                if let Some(phase) = parsed.phase.as_ref().filter(|item| !item.trim().is_empty()) {
+                    branch.phase = Some(phase.trim().to_string());
+                    branch.progress_kind = Some(phase.trim().to_string());
+                }
+                if let Some(snippet) = parsed
+                    .lean_snippets
+                    .first()
+                    .cloned()
+                    .or_else(|| extract_lean_code_block(text))
+                {
+                    branch.lean_snippet = snippet.clone();
+                    branch.search_status = "candidate updated".to_string();
+                    branch.progress_kind = Some(
+                        if branch.role == openproof_protocol::AgentRole::Repairer {
+                            "repairing".to_string()
+                        } else {
+                            "candidate".to_string()
+                        },
+                    );
+                    if let Some(focus_node_id) = branch.focus_node_id.clone().or(active_node_id) {
+                        if let Some(node) = session
+                            .proof
+                            .nodes
+                            .iter_mut()
+                            .find(|node| node.id == focus_node_id)
+                        {
+                            node.content = snippet;
+                            node.status = ProofNodeStatus::Proving;
+                            node.updated_at = now.clone();
+                            session.proof.active_node_id = Some(node.id.clone());
+                        }
+                    }
+                }
+                if !parsed.next_steps.is_empty() {
+                    branch.summary = parsed.next_steps.join(" ");
+                } else if !parsed.paper_notes.is_empty() {
+                    branch.summary = parsed.paper_notes.join(" ");
+                }
+                if branch.role == openproof_protocol::AgentRole::Planner
+                    && !branch.summary.trim().is_empty()
+                {
+                    session.proof.strategy_summary = Some(branch.summary.clone());
+                }
+                if !branch.hidden {
+                    session.proof.active_branch_id = Some(branch.id.clone());
+                    session.proof.active_agent_role = Some(branch.role);
+                    session.proof.phase = branch
+                        .phase
+                        .clone()
+                        .unwrap_or_else(|| phase_from_role(branch.role).to_string());
+                    session.proof.goal_summary = branch
+                        .latest_goals
+                        .clone()
+                        .or_else(|| {
+                            (!branch.goal_summary.trim().is_empty())
+                                .then(|| branch.goal_summary.clone())
+                        });
+                    session.proof.status_line = format!(
+                        "{} branch updated {}.",
+                        agent_role_label(branch.role),
+                        branch.title
+                    );
+                }
+                return (session.clone(), session.proof.status_line.clone());
+            }
+            (session.clone(), "Branch update received.".to_string())
+        }) {
+            self.pending_writes += 1;
+            self.status = status_line;
+            return Some(PendingWrite { session: snapshot });
+        }
+        None
+    }
+
+    pub(crate) fn apply_finish_branch(
+        &mut self,
+        branch_id: String,
+        status: AgentStatus,
+        summary: String,
+        output: String,
+    ) -> Option<PendingWrite> {
+        if let Some((snapshot, status_line)) = self.current_session_mut().map(|session| {
+            let now = Utc::now().to_rfc3339();
+            session.updated_at = now.clone();
+            if let Some(branch) = session
+                .proof
+                .branches
+                .iter_mut()
+                .find(|branch| branch.id == branch_id)
+            {
+                branch.updated_at = now.clone();
+                branch.status = status;
+                branch.queue_state = match status {
+                    AgentStatus::Done => BranchQueueState::Done,
+                    AgentStatus::Error => BranchQueueState::Error,
+                    AgentStatus::Blocked => BranchQueueState::Blocked,
+                    AgentStatus::Running => BranchQueueState::Running,
+                    AgentStatus::Idle => BranchQueueState::Queued,
+                };
+                branch.summary = summary.clone();
+                branch.diagnostics = output.clone();
+                branch.transcript.push(BranchMessage {
+                    id: next_id("branchmsg"),
+                    role: MessageRole::System,
+                    content: format!(
+                        "Branch {}: {}",
+                        crate::helpers::format_agent_status(status),
+                        summary
+                    ),
+                    created_at: now.clone(),
+                });
+            }
+            for agent in &mut session.proof.agents {
+                if agent.branch_ids.iter().any(|id| id == &branch_id) {
+                    agent.status = status;
+                    agent.updated_at = now.clone();
+                    if let Some(task) = agent
+                        .tasks
+                        .iter_mut()
+                        .find(|task| task.branch_id.as_deref() == Some(branch_id.as_str()))
+                    {
+                        task.status = status;
+                        task.output = output.clone();
+                        task.updated_at = now.clone();
+                    }
+                }
+            }
+            session.proof.status_line = summary.clone();
+            (session.clone(), summary)
+        }) {
+            self.pending_writes += 1;
+            self.status = status_line;
+            return Some(PendingWrite { session: snapshot });
+        }
+        None
+    }
+
+    pub(crate) fn apply_append_notice(
+        &mut self,
+        title: String,
+        content: String,
+    ) -> Option<PendingWrite> {
+        let entry = TranscriptEntry {
+            id: next_id("native_msg"),
+            role: MessageRole::Notice,
+            title: Some(title),
+            content,
+            created_at: Utc::now().to_rfc3339(),
+        };
+        if let Some(snapshot) = self.current_session_mut().map(|session| {
+            session.updated_at = entry.created_at.clone();
+            session.transcript.push(entry);
+            session.clone()
+        }) {
+            self.sync_question_selection();
+            self.pending_writes += 1;
+            self.status = "Local command applied.".to_string();
+            return Some(PendingWrite { session: snapshot });
+        }
+        None
+    }
+
+    pub(crate) fn apply_sync_completed(&mut self) -> Option<PendingWrite> {
+        if let Ok(write) = self.mark_sync_completed() {
+            return Some(write);
+        }
+        None
+    }
+}
