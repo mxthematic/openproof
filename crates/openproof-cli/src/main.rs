@@ -820,46 +820,30 @@ async fn run_app(
             break;
         }
 
-        if event::poll(Duration::from_millis(16))? {
+        // Drain all pending terminal events before rendering.
+        // First poll blocks up to 16ms; subsequent polls use zero timeout
+        // to coalesce rapid inputs (especially scroll) into one frame.
+        let mut poll_timeout = Duration::from_millis(16);
+        while event::poll(poll_timeout)? {
+            poll_timeout = Duration::ZERO;
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     if state.overlay.is_some() {
-                        // --- Overlay captures all input ---
                         handle_overlay_key(key, state, &tx, &store);
                     } else if state.command_mode {
-                        // --- Command mode key handling ---
                         handle_command_mode_key(key, state, &tx, &store);
                     } else {
-                        // --- Normal mode key handling ---
                         let next_event = match key.code {
                             KeyCode::Char('c')
                                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
                             {
-                                if state.command_mode {
-                                    // Exit command mode
-                                    state.command_mode = false;
-                                    state.command_buffer.clear();
-                                    state.command_cursor = 0;
-                                    state.command_completions.clear();
-                                    state.completion_idx = None;
-                                    None
-                                } else if !state.composer.is_empty() {
-                                    // First Ctrl+C: clear input
+                                if !state.composer.is_empty() {
                                     state.composer.clear();
                                     state.composer_cursor = 0;
                                     None
                                 } else {
-                                    // Second Ctrl+C (empty input): quit
                                     Some(AppEvent::Quit)
                                 }
-                            }
-                            KeyCode::Esc if state.command_mode => {
-                                state.command_mode = false;
-                                state.command_buffer.clear();
-                                state.command_cursor = 0;
-                                state.command_completions.clear();
-                                state.completion_idx = None;
-                                None
                             }
                             KeyCode::Tab => Some(AppEvent::FocusNext),
                             KeyCode::Up if state.has_open_question() => {
@@ -878,14 +862,12 @@ async fn run_app(
                             }),
                             KeyCode::PageUp => Some(AppEvent::ScrollPageUp),
                             KeyCode::PageDown => Some(AppEvent::ScrollPageDown),
-                            // Cursor movement
                             KeyCode::Left => Some(AppEvent::CursorLeft),
                             KeyCode::Right => Some(AppEvent::CursorRight),
                             KeyCode::Home => Some(AppEvent::CursorHome),
                             KeyCode::End => Some(AppEvent::CursorEnd),
                             KeyCode::Delete => Some(AppEvent::DeleteForward),
                             KeyCode::Backspace => Some(AppEvent::Backspace),
-                            // Ctrl shortcuts
                             KeyCode::Char('a')
                                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
                             {
@@ -906,7 +888,6 @@ async fn run_app(
                             {
                                 Some(AppEvent::DeleteWordBackward)
                             }
-                            // '/' on empty composer: enter command mode
                             KeyCode::Char('/')
                                 if state.composer.is_empty()
                                     && !key.modifiers.contains(KeyModifiers::CONTROL) =>
@@ -919,7 +900,6 @@ async fn run_app(
                                 state.completion_idx = None;
                                 None
                             }
-                            // Character input
                             KeyCode::Char(ch)
                                 if !key.modifiers.contains(KeyModifiers::CONTROL) =>
                             {
