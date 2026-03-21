@@ -1701,6 +1701,7 @@ fn default_proof_state() -> ProofSessionState {
         agents: Vec::new(),
         last_rendered_scratch: None,
         last_verification: None,
+        paper_tex: String::new(),
     }
 }
 

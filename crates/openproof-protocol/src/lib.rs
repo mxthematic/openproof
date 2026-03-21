@@ -230,6 +230,8 @@ pub struct ProofSessionState {
     pub agents: Vec<AgentRecord>,
     pub last_rendered_scratch: Option<String>,
     pub last_verification: Option<LeanVerificationSummary>,
+    /// Accumulated LaTeX paper body, written incrementally by the model.
+    pub paper_tex: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

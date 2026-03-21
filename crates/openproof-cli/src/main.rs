@@ -3226,6 +3226,13 @@ fn build_system_prompt(session: Option<&SessionSnapshot>) -> String {
         "Keep momentum, be direct, and when a proof node is active prefer concrete Lean progress over exposition.".to_string(),
         "When writing Lean 4 proofs: prefer well-known tactics (simp, omega, ring, norm_num, exact?, apply?, rw?) over guessing exact lemma names. If unsure of an exact Mathlib lemma name, use `exact?` or `apply?` to let Lean search at compile time. This avoids hallucinated lemma names that cause Unknown constant errors. Use fully-qualified names like `RingHom.ker f` instead of dot notation `f.ker` when field notation may not be available. Prefer `n.factorial` over `n!` notation. Use `Nat.Prime p` as the type for prime hypotheses.".to_string(),
         "When formalizing or continuing a proof, prefer structured progress markers such as TITLE, PROBLEM, FORMAL_TARGET, ACCEPTED_TARGET, PHASE, STATUS, QUESTION, OPTION, OPTION_TARGET, RECOMMENDED_OPTION, THEOREM, LEMMA, PAPER, NEXT, and fenced ```lean``` blocks when relevant.".to_string(),
+        "Break complex proofs into sub-lemmas. For each key intermediate result, emit a separate LEMMA: label :: statement marker. This creates individual proof nodes for the dashboard graph.".to_string(),
+        concat!(
+            "After making proof progress, include a ```latex block containing the CUMULATIVE paper body (not the preamble). ",
+            "Write it as a proper academic math paper: theorem environments, proof sketches in natural language, mathematical notation in $...$ and \\[...\\], ",
+            "references to the Lean formalization, and clear exposition. The paper should read like a publishable math article, not a code dump. ",
+            "Include the Lean code in lstlisting environments as supporting formalization. Each update should contain the FULL paper body so far, not just the delta.",
+        ).to_string(),
     ];
     if !prompt_context.instructions.trim().is_empty() {
         sections.push(format!("Loaded instructions:\n{}", prompt_context.instructions.trim()));

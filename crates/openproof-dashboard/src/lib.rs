@@ -243,6 +243,28 @@ fn generate_tex(session: &SessionSnapshot) -> String {
     let proof = &session.proof;
     let title = &session.title;
 
+    // If the model has written a LaTeX paper body, use it directly.
+    if !proof.paper_tex.trim().is_empty() {
+        let mut doc = String::new();
+        doc.push_str("\\documentclass[11pt]{article}\n");
+        doc.push_str("\\usepackage[margin=1in]{geometry}\n");
+        doc.push_str("\\usepackage{amsmath,amssymb,amsthm}\n");
+        doc.push_str("\\usepackage{listings}\n");
+        doc.push_str("\\usepackage{xcolor}\n");
+        doc.push_str("\\lstset{basicstyle=\\ttfamily\\small,breaklines=true,frame=single,backgroundcolor=\\color{gray!10}}\n");
+        doc.push_str("\\newtheorem{theorem}{Theorem}\n");
+        doc.push_str("\\newtheorem{lemma}[theorem]{Lemma}\n");
+        doc.push_str("\\newtheorem{proposition}[theorem]{Proposition}\n");
+        doc.push_str(&format!("\n\\title{{{}}}\n", tex_escape(title)));
+        doc.push_str("\\author{OpenProof}\n");
+        doc.push_str("\\date{\\today}\n\n");
+        doc.push_str("\\begin{document}\n\\maketitle\n\n");
+        doc.push_str(&proof.paper_tex);
+        doc.push_str("\n\n\\end{document}\n");
+        return doc;
+    }
+
+    // Fallback: mechanical generation from proof state.
     let mut doc = String::new();
     doc.push_str("\\documentclass[11pt]{article}\n");
     doc.push_str("\\usepackage[margin=1in]{geometry}\n");

@@ -1763,6 +1763,9 @@ impl AppState {
                         if !parsed.paper_notes.is_empty() {
                             session.proof.paper_notes.extend(parsed.paper_notes.clone());
                         }
+                        if let Some(ref tex) = parsed.paper_tex {
+                            session.proof.paper_tex = tex.clone();
+                        }
                         if let Some(question) = parsed.question.clone() {
                             session.proof.status_line = format!("Awaiting clarification: {}", question.prompt);
                             session.proof.phase = "formalizing".to_string();
@@ -2251,6 +2254,7 @@ fn default_session_with_workspace(
             agents: Vec::new(),
             last_rendered_scratch: None,
             last_verification: None,
+            paper_tex: String::new(),
         },
     }
 }
@@ -2354,6 +2358,7 @@ struct ParsedAssistantOutput {
     search_status: Option<String>,
     assumptions: Vec<String>,
     paper_notes: Vec<String>,
+    paper_tex: Option<String>,
     next_steps: Vec<String>,
     lean_snippets: Vec<String>,
     created_nodes: Vec<ParsedAssistantNode>,
@@ -2363,6 +2368,7 @@ struct ParsedAssistantOutput {
 fn parse_assistant_output(text: &str) -> ParsedAssistantOutput {
     let mut parsed = ParsedAssistantOutput {
         lean_snippets: extract_lean_code_blocks(text),
+        paper_tex: extract_latex_block(text),
         ..ParsedAssistantOutput::default()
     };
     let mut question_prompt: Option<String> = None;
@@ -2557,6 +2563,19 @@ fn extract_lean_code_blocks(content: &str) -> Vec<String> {
         rest = &after_start[end + "```".len()..];
     }
     snippets
+}
+
+fn extract_latex_block(content: &str) -> Option<String> {
+    let start = content.find("```latex")?;
+    let after_start = &content[start + "```latex".len()..];
+    let after_start = after_start.strip_prefix('\n').unwrap_or(after_start);
+    let end = after_start.find("```")?;
+    let block = after_start[..end].trim();
+    if block.is_empty() {
+        None
+    } else {
+        Some(block.to_string())
+    }
 }
 
 fn derive_goal_label(title: &str) -> String {
