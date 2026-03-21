@@ -1515,6 +1515,38 @@ impl AppStore {
         Ok(items)
     }
 
+    /// Get recent failed attempts for a given target, for negative retrieval.
+    /// Returns (failure_class, snippet_preview, diagnostic_preview) tuples.
+    pub fn failed_attempts_for_target(
+        &self,
+        target_label: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, String, String)>> {
+        let conn = self.connect()?;
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT failure_class, snippet, diagnostic
+            FROM attempt_logs
+            WHERE target_label = ? OR target_statement LIKE ?
+            ORDER BY last_seen_at DESC
+            LIMIT ?
+            "#,
+        )?;
+        let pattern = format!("%{}%", target_label);
+        let rows = stmt.query_map(params![target_label, pattern, limit as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1).unwrap_or_default().chars().take(200).collect::<String>(),
+                row.get::<_, String>(2).unwrap_or_default().chars().take(200).collect::<String>(),
+            ))
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
     pub fn list_verified_upload_candidates(
         &self,
         limit: usize,
