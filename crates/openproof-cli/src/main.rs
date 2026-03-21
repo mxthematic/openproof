@@ -18,6 +18,7 @@ use openproof_store::{AppStore, StorePaths};
 use ratatui::backend::CrosstermBackend;
 use std::{
     env, fs, io,
+    io::Write as _,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -656,33 +657,36 @@ async fn run_shell(launch_cwd: PathBuf) -> Result<()> {
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
-        let _ = crossterm::execute!(
-            io::stderr(),
-            crossterm::event::DisableMouseCapture,
-            crossterm::terminal::LeaveAlternateScreen,
-            crossterm::cursor::Show,
-        );
+        let _ = crossterm::execute!(io::stderr(), crossterm::cursor::Show);
+        // Reset scroll region in case we crash mid-insert.
+        let _ = write!(io::stderr(), "\x1b[r");
         original_hook(info);
     }));
 
     enable_raw_mode()?;
+    // Clear screen and position cursor at top.
     let mut stdout = io::stdout();
-    crossterm::execute!(
-        stdout,
-        crossterm::style::Print("\x1b[r\x1b[0m\x1b[H\x1b[2J\x1b[3J\x1b[H"),
-        crossterm::terminal::EnterAlternateScreen,
-        crossterm::event::EnableMouseCapture,
-    )?;
+    write!(stdout, "\x1b[r\x1b[0m\x1b[H\x1b[2J\x1b[3J\x1b[H")?;
+    stdout.flush()?;
+
     let backend = CrosstermBackend::new(stdout);
-    let mut terminal = ratatui::Terminal::new(backend)?;
+    let mut terminal =
+        openproof_tui::custom_terminal::CustomTerminal::with_options(backend)?;
+    // Set viewport to fill the terminal.
+    let size = terminal.size()?;
+    terminal.set_viewport_area(ratatui::layout::Rect::new(
+        0, 0, size.width, size.height,
+    ));
     let app_result = run_app(&mut terminal, store, &mut state, tx, &mut rx).await;
     disable_raw_mode()?;
-    crossterm::execute!(
-        terminal.backend_mut(),
-        crossterm::event::DisableMouseCapture,
-        crossterm::terminal::LeaveAlternateScreen,
-    )?;
     terminal.show_cursor()?;
+    terminal.clear()?;
+    // Move cursor below viewport for clean shell prompt.
+    let vp = terminal.viewport_area;
+    let _ = crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm::cursor::MoveTo(0, vp.bottom()),
+    );
     let _ = std::panic::take_hook();
     app_result
 }
@@ -704,7 +708,7 @@ async fn build_health_report(launch_cwd: PathBuf) -> Result<HealthReport> {
 }
 
 async fn run_app(
-    terminal: &mut ratatui::Terminal<CrosstermBackend<io::Stdout>>,
+    terminal: &mut openproof_tui::custom_terminal::CustomTerminal<CrosstermBackend<io::Stdout>>,
     store: AppStore,
     state: &mut AppState,
     tx: mpsc::UnboundedSender<AppEvent>,
@@ -812,6 +816,34 @@ async fn run_app(
                             let _ = tx.send(AppEvent::AutonomousTick);
                         }
                     }
+                }
+            }
+        }
+
+        // Flush completed turns to terminal scrollback (enables native scrollbar).
+        // A "completed turn" is a user message followed by a finished assistant response.
+        // We flush in pairs: if we have entries [user, assistant, user, assistant, user]
+        // and assistant is done, we can flush the first 4 (2 complete turns).
+        if !state.turn_in_flight {
+            if let Some(session) = state.current_session() {
+                let transcript_len = session.transcript.len();
+                // Flush all entries except the last one (keep it in viewport
+                // so the user sees the most recent response).
+                let flushable = transcript_len.saturating_sub(1);
+                if flushable > state.flushed_turn_count {
+                    let entries_to_flush: Vec<_> = session.transcript
+                        [state.flushed_turn_count..flushable]
+                        .to_vec();
+                    let mut lines = Vec::new();
+                    for entry in &entries_to_flush {
+                        lines.extend(openproof_tui::render_entry(entry));
+                    }
+                    if !lines.is_empty() {
+                        let _ = openproof_tui::insert_history::insert_history_lines(
+                            terminal, lines,
+                        );
+                    }
+                    state.flushed_turn_count = flushable;
                 }
             }
         }

@@ -1,4 +1,5 @@
 pub mod custom_terminal;
+pub mod insert_history;
 pub mod markdown;
 
 use openproof_core::{AppState, Overlay};
@@ -9,8 +10,35 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-/// Draw using the custom inline-viewport Frame.
-pub fn draw(frame: &mut ratatui::Frame<'_>, state: &mut AppState) {
+/// Render a single transcript entry into styled Lines (for flushing to scrollback).
+pub fn render_entry(entry: &openproof_protocol::TranscriptEntry) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = vec![Line::from("")];
+    match entry.role {
+        openproof_protocol::MessageRole::User => {
+            for content_line in entry.content.lines() {
+                lines.push(Line::from(vec![
+                    Span::styled("> ".to_string(), Style::default().fg(Color::DarkGray)),
+                    Span::raw(content_line.to_string()),
+                ]));
+            }
+        }
+        openproof_protocol::MessageRole::Assistant => {
+            lines.extend(markdown::render_markdown(&entry.content, Style::default()));
+        }
+        _ => {
+            for content_line in entry.content.lines() {
+                lines.push(Line::from(Span::styled(
+                    content_line.to_string(),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+        }
+    }
+    lines
+}
+
+/// Draw the TUI frame (only unflushed content).
+pub fn draw(frame: &mut custom_terminal::Frame<'_>, state: &mut AppState) {
     let area = frame.area();
 
     let prefix_len = 2; // "> "
@@ -51,7 +79,7 @@ pub fn draw(frame: &mut ratatui::Frame<'_>, state: &mut AppState) {
 // Chat area (scrollable transcript)
 // ---------------------------------------------------------------------------
 
-fn draw_chat_area(f: &mut ratatui::Frame<'_>, state: &mut AppState, area: Rect) {
+fn draw_chat_area(f: &mut custom_terminal::Frame<'_>, state: &mut AppState, area: Rect) {
     let transcript_lines = state
         .current_session()
         .map(|session| {
@@ -64,9 +92,11 @@ fn draw_chat_area(f: &mut ratatui::Frame<'_>, state: &mut AppState, area: Rect) 
                     )),
                 ]
             } else {
+                // Only render entries not yet flushed to scrollback.
                 session
                     .transcript
                     .iter()
+                    .skip(state.flushed_turn_count)
                     .flat_map(|entry| {
                         let mut lines: Vec<Line<'static>> = vec![Line::from("")];
 
@@ -170,7 +200,7 @@ fn draw_chat_area(f: &mut ratatui::Frame<'_>, state: &mut AppState, area: Rect) 
 // Composer (input area)
 // ---------------------------------------------------------------------------
 
-fn draw_input_area(f: &mut ratatui::Frame<'_>, state: &AppState, area: Rect) {
+fn draw_input_area(f: &mut custom_terminal::Frame<'_>, state: &AppState, area: Rect) {
     let mut spans = vec![Span::styled(
         "> ".to_string(),
         Style::default()
@@ -205,7 +235,7 @@ fn draw_input_area(f: &mut ratatui::Frame<'_>, state: &AppState, area: Rect) {
 // Status bar
 // ---------------------------------------------------------------------------
 
-fn draw_status_bar(f: &mut ratatui::Frame<'_>, state: &AppState, area: Rect) {
+fn draw_status_bar(f: &mut custom_terminal::Frame<'_>, state: &AppState, area: Rect) {
     let text = if state.turn_in_flight || state.verification_in_flight {
         let activity = match (state.turn_in_flight, state.verification_in_flight) {
             (true, true) => "working + verifying...",
@@ -229,7 +259,7 @@ fn draw_status_bar(f: &mut ratatui::Frame<'_>, state: &AppState, area: Rect) {
 // Command bar (/ mode)
 // ---------------------------------------------------------------------------
 
-fn draw_command_bar(f: &mut ratatui::Frame<'_>, state: &AppState, area: Rect) {
+fn draw_command_bar(f: &mut custom_terminal::Frame<'_>, state: &AppState, area: Rect) {
     let mut spans = vec![Span::styled(
         "/".to_string(),
         Style::default()
@@ -244,7 +274,7 @@ fn draw_command_bar(f: &mut ratatui::Frame<'_>, state: &AppState, area: Rect) {
     f.render_widget(para, area);
 }
 
-fn draw_completion_popup(f: &mut ratatui::Frame<'_>, state: &AppState, cmd_area: Rect) {
+fn draw_completion_popup(f: &mut custom_terminal::Frame<'_>, state: &AppState, cmd_area: Rect) {
     let completions = &state.command_completions;
     let max_show = completions.len().min(8);
     if max_show == 0 {
@@ -292,7 +322,7 @@ fn draw_completion_popup(f: &mut ratatui::Frame<'_>, state: &AppState, cmd_area:
 // Overlays
 // ---------------------------------------------------------------------------
 
-fn draw_overlay(f: &mut ratatui::Frame<'_>, state: &AppState, overlay: &Overlay, area: Rect) {
+fn draw_overlay(f: &mut custom_terminal::Frame<'_>, state: &AppState, overlay: &Overlay, area: Rect) {
     match overlay {
         Overlay::SessionPicker { selected } => draw_session_picker(f, state, *selected, area),
         Overlay::FocusPicker { items, selected } => {
@@ -301,7 +331,7 @@ fn draw_overlay(f: &mut ratatui::Frame<'_>, state: &AppState, overlay: &Overlay,
     }
 }
 
-fn draw_session_picker(f: &mut ratatui::Frame<'_>, state: &AppState, selected: usize, area: Rect) {
+fn draw_session_picker(f: &mut custom_terminal::Frame<'_>, state: &AppState, selected: usize, area: Rect) {
     let popup = centered_rect(75, 60, area);
     f.render_widget(Clear, popup);
 
@@ -382,7 +412,7 @@ fn draw_session_picker(f: &mut ratatui::Frame<'_>, state: &AppState, selected: u
 }
 
 fn draw_focus_picker(
-    f: &mut ratatui::Frame<'_>,
+    f: &mut custom_terminal::Frame<'_>,
     items: &[(String, String, String)],
     selected: usize,
     area: Rect,
@@ -529,7 +559,7 @@ fn cursor_visual_row(text: &str, cursor: usize, prefix_len: usize, width: usize)
 // Question modal (unchanged domain logic)
 // ---------------------------------------------------------------------------
 
-fn render_question_modal(frame: &mut ratatui::Frame<'_>, state: &AppState) {
+fn render_question_modal(frame: &mut custom_terminal::Frame<'_>, state: &AppState) {
     let Some(question) = state.pending_question() else {
         return;
     };

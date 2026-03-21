@@ -143,6 +143,8 @@ pub struct AppState {
     pub command_completions: Vec<String>,
     pub completion_idx: Option<usize>,
     pub overlay: Option<Overlay>,
+    /// How many transcript entries have been flushed to terminal scrollback.
+    pub flushed_turn_count: usize,
 }
 
 impl AppState {
@@ -185,6 +187,7 @@ impl AppState {
             command_completions: Vec::new(),
             completion_idx: None,
             overlay: None,
+            flushed_turn_count: 0,
         }
     }
 
