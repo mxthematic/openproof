@@ -439,6 +439,8 @@ async fn run_autonomous(launch_cwd: PathBuf, problem: String, label: Option<Stri
         loop {
             match tokio::time::timeout(Duration::from_millis(500), rx.recv()).await {
                 Ok(Some(event)) => {
+                    // Track branches that just finished for verification
+                    let mut finished_branch_id: Option<String> = None;
                     match &event {
                         AppEvent::AppendBranchAssistant { branch_id, content } => {
                             let lean_count = content.matches("```lean").count();
@@ -447,6 +449,7 @@ async fn run_autonomous(launch_cwd: PathBuf, problem: String, label: Option<Stri
                         }
                         AppEvent::FinishBranch { branch_id, status, summary, .. } => {
                             eprintln!("[run] Branch {branch_id} finished: {status:?} -- {summary}");
+                            finished_branch_id = Some(branch_id.clone());
                         }
                         AppEvent::LeanVerifyStarted => {
                             eprintln!("[run] Lean verification started...");
@@ -474,6 +477,30 @@ async fn run_autonomous(launch_cwd: PathBuf, problem: String, label: Option<Stri
                     if let Some(write) = state.apply(event) {
                         persist_write(tx.clone(), store.clone(), write);
                     }
+
+                    // After a branch finishes, check if it has lean code and verify
+                    if let Some(bid) = finished_branch_id {
+                        if let Some(session_snapshot) = state.current_session().cloned() {
+                            let branch_info = session_snapshot.proof.branches.iter()
+                                .find(|b| b.id == bid)
+                                .map(|b| (b.lean_snippet.trim().is_empty(), b.hidden));
+                            if let Some((snippet_empty, hidden)) = branch_info {
+                                if !snippet_empty {
+                                    eprintln!("[run] Branch {} has lean snippet, starting verification...", bid);
+                                    start_branch_verification(
+                                        tx.clone(),
+                                        store.clone(),
+                                        session_snapshot,
+                                        bid.clone(),
+                                        !hidden,
+                                    );
+                                } else {
+                                    eprintln!("[run] Branch {} finished with no lean candidate.", bid);
+                                }
+                            }
+                        }
+                    }
+
                     // Check if settled
                     let s = state.current_session().cloned().unwrap();
                     let all_done = s.proof.branches.iter().all(|b|
@@ -2621,13 +2648,27 @@ fn apply_local_command(
             );
         }
         "/dashboard" => {
-            emit_local_notice(
-                tx,
-                state,
-                store,
-                "Dashboard",
-                "Use `openproof dashboard --open` from another shell to launch the Rust dashboard server.".to_string(),
-            );
+            let store_dash = store.clone();
+            let tx_dash = tx.clone();
+            let lean_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join("lean");
+            tokio::spawn(async move {
+                match start_dashboard_server(store_dash, lean_dir, None).await {
+                    Ok(server) => {
+                        let url = format!("http://127.0.0.1:{}", server.port);
+                        open_browser(&url);
+                        let _ = tx_dash.send(AppEvent::AppendNotice {
+                            title: "Dashboard".to_string(),
+                            content: format!("Dashboard opened at {url}"),
+                        });
+                    }
+                    Err(e) => {
+                        let _ = tx_dash.send(AppEvent::AppendNotice {
+                            title: "Dashboard Error".to_string(),
+                            content: format!("Could not start dashboard: {e}"),
+                        });
+                    }
+                }
+            });
         }
         "/sessions" => {
             // Open interactive session picker.
