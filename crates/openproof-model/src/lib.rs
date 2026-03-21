@@ -294,7 +294,85 @@ fn serialize_turn_message(message: &TurnMessage) -> Value {
     }
 }
 
+/// Like `run_codex_turn` but sends each text delta through a channel as it arrives.
+/// The final complete text is still returned.
+pub async fn run_codex_turn_streaming(
+    request: CodexTurnRequest<'_>,
+    delta_tx: tokio::sync::mpsc::UnboundedSender<String>,
+) -> Result<String> {
+    let auth = load_auth_state()?
+        .filter(|state| state.auth_mode.as_deref() == Some("chatgpt"))
+        .context("Openproof is not authenticated. Run `openproof login`.")?;
+    let tokens = auth
+        .tokens
+        .context("Missing ChatGPT tokens in auth state.")?;
+
+    let client = reqwest::Client::builder().build()?;
+    let payload = build_turn_payload(&request);
+    let mut response = client
+        .post(format!("{OPENAI_CODEX_BASE_URL}/responses"))
+        .header("authorization", format!("Bearer {}", tokens.access_token))
+        .header("content-type", "application/json")
+        .header("accept", "text/event-stream")
+        .header("originator", DEFAULT_ORIGINATOR)
+        .header(
+            "chatgpt-account-id",
+            tokens.account_id.clone().unwrap_or_default(),
+        )
+        .header("session_id", request.session_id)
+        .json(&payload)
+        .send()
+        .await?;
+
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        let synced = sync_auth_from_codex_cli()?;
+        if synced.is_some() {
+            let retry_auth = load_auth_state()?
+                .filter(|state| state.auth_mode.as_deref() == Some("chatgpt"))
+                .context("Openproof is not authenticated after sync.")?;
+            let retry_tokens = retry_auth
+                .tokens
+                .context("Missing ChatGPT tokens in synced auth state.")?;
+            response = client
+                .post(format!("{OPENAI_CODEX_BASE_URL}/responses"))
+                .header(
+                    "authorization",
+                    format!("Bearer {}", retry_tokens.access_token),
+                )
+                .header("content-type", "application/json")
+                .header("accept", "text/event-stream")
+                .header("originator", DEFAULT_ORIGINATOR)
+                .header(
+                    "chatgpt-account-id",
+                    retry_tokens.account_id.clone().unwrap_or_default(),
+                )
+                .header("session_id", request.session_id)
+                .json(&payload)
+                .send()
+                .await?;
+        }
+    }
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default();
+        anyhow::bail!("OpenProof transport failed with status {status}: {detail}");
+    }
+
+    read_event_stream_with_callback(response, |delta| {
+        let _ = delta_tx.send(delta.to_string());
+    })
+    .await
+}
+
 async fn read_event_stream(response: reqwest::Response) -> Result<String> {
+    read_event_stream_with_callback(response, |_| {}).await
+}
+
+async fn read_event_stream_with_callback(
+    response: reqwest::Response,
+    on_delta: impl Fn(&str),
+) -> Result<String> {
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();
     let mut full_text = String::new();
@@ -316,6 +394,7 @@ async fn read_event_stream(response: reqwest::Response) -> Result<String> {
                     event.get("type").and_then(Value::as_str) == Some("response.output_text.delta")
                 }) {
                     full_text.push_str(delta);
+                    on_delta(delta);
                 }
                 if matches!(
                     event.get("type").and_then(Value::as_str),

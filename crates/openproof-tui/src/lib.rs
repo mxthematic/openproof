@@ -135,32 +135,71 @@ fn draw_chat_area(f: &mut custom_terminal::Frame<'_>, state: &mut AppState, area
         })
         .unwrap_or_else(|| vec![Line::from("No active session.")]);
 
-    // Thinking spinner when waiting for assistant
+    // Streaming response and/or spinner when waiting for assistant
     let mut all_lines = transcript_lines;
     if state.turn_in_flight {
+        if !state.streaming_text.is_empty() {
+            // Show streamed text as it arrives
+            all_lines.push(Line::from(""));
+            all_lines.push(Line::from(Span::styled(
+                "Assistant:".to_string(),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            if matches!(
+                state.current_session().and_then(|s| s.transcript.last()).map(|e| e.role),
+                Some(openproof_protocol::MessageRole::Assistant)
+            ) {
+                // Already have an assistant header from prior streaming
+            }
+            for line in state.streaming_text.lines() {
+                all_lines.push(Line::from(format!("  {line}")));
+            }
+            // Cursor blink at end
+            all_lines.push(Line::from(Span::styled(
+                "  _".to_string(),
+                Style::default().fg(Color::DarkGray),
+            )));
+        } else {
+            // No streaming text yet -- show spinner
+            let elapsed_ms = state
+                .turn_started_at
+                .map(|t| t.elapsed().as_millis())
+                .unwrap_or(0);
+            const FRAMES: &[&str] = &["-", "\\", "|", "/"];
+            let spinner = FRAMES[(elapsed_ms / 200) as usize % FRAMES.len()];
+            let elapsed_str = if elapsed_ms < 60_000 {
+                format!("{}s", elapsed_ms / 1000)
+            } else {
+                format!(
+                    "{}m {}s",
+                    elapsed_ms / 60_000,
+                    (elapsed_ms % 60_000) / 1000
+                )
+            };
+            all_lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  {spinner} "),
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::styled("Thinking... ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("({elapsed_str})"),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
+        }
+    } else if state.verification_in_flight {
         let elapsed_ms = state
             .turn_started_at
             .map(|t| t.elapsed().as_millis())
             .unwrap_or(0);
-        const FRAMES: &[&str] = &["-", "\\", "|", "/"];
-        let spinner = FRAMES[(elapsed_ms / 200) as usize % FRAMES.len()];
-        let elapsed_str = if elapsed_ms < 60_000 {
-            format!("{}s", elapsed_ms / 1000)
-        } else {
-            format!(
-                "{}m {}s",
-                elapsed_ms / 60_000,
-                (elapsed_ms % 60_000) / 1000
-            )
-        };
+        let elapsed_str = format!("{}s", elapsed_ms / 1000);
         all_lines.push(Line::from(vec![
+            Span::styled("  > ", Style::default().fg(Color::Green)),
             Span::styled(
-                format!("  {spinner} "),
-                Style::default().fg(Color::Yellow),
-            ),
-            Span::styled("Working... ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                format!("({elapsed_str})"),
+                format!("Verifying with Lean... ({elapsed_str})"),
                 Style::default().fg(Color::DarkGray),
             ),
         ]));

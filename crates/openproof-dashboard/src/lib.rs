@@ -60,6 +60,8 @@ pub async fn start_dashboard_server(
         .route("/api/sessions", get(sessions))
         .route("/api/session", get(session))
         .route("/api/raw-state", get(status))
+        .route("/api/paper/tex", get(paper_tex))
+        .route("/api/paper/pdf", get(paper_pdf))
         .with_state(state);
 
     let primary_port = preferred_port.unwrap_or(4821);
@@ -181,6 +183,168 @@ async fn session(
         Some(session) => Ok(Json(session).into_response()),
         None => Ok(StatusCode::NOT_FOUND.into_response()),
     }
+}
+
+async fn paper_tex(
+    State(state): State<Arc<DashboardState>>,
+    Query(query): Query<SessionQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let session = match query.id.as_deref() {
+        Some(id) => state.store.get_session(id).map_err(internal_error)?,
+        None => state.store.latest_session().map_err(internal_error)?,
+    };
+    let Some(session) = session else {
+        return Ok((StatusCode::NOT_FOUND, "No session").into_response());
+    };
+    let tex = generate_tex(&session);
+    Ok(([(CONTENT_TYPE, "text/plain; charset=utf-8")], tex).into_response())
+}
+
+async fn paper_pdf(
+    State(state): State<Arc<DashboardState>>,
+    Query(query): Query<SessionQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let session = match query.id.as_deref() {
+        Some(id) => state.store.get_session(id).map_err(internal_error)?,
+        None => state.store.latest_session().map_err(internal_error)?,
+    };
+    let Some(session) = session else {
+        return Ok((StatusCode::NOT_FOUND, "No session").into_response());
+    };
+    let tex = generate_tex(&session);
+
+    // Compile in a temp directory.
+    let tmp = std::env::temp_dir().join("openproof-paper");
+    let _ = std::fs::create_dir_all(&tmp);
+    let tex_path = tmp.join("paper.tex");
+    std::fs::write(&tex_path, &tex).map_err(|e| internal_error(e.into()))?;
+
+    let output = Command::new("pdflatex")
+        .args(["-interaction=nonstopmode", "-halt-on-error", "paper.tex"])
+        .current_dir(&tmp)
+        .output()
+        .map_err(|e| internal_error(anyhow::anyhow!("pdflatex failed to start: {e}")))?;
+
+    let pdf_path = tmp.join("paper.pdf");
+    if !pdf_path.exists() {
+        let stderr = String::from_utf8_lossy(&output.stdout);
+        return Ok((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("pdflatex failed:\n{stderr}"),
+        )
+            .into_response());
+    }
+
+    let pdf_bytes = std::fs::read(&pdf_path).map_err(|e| internal_error(e.into()))?;
+    Ok(([(CONTENT_TYPE, "application/pdf")], pdf_bytes).into_response())
+}
+
+fn generate_tex(session: &SessionSnapshot) -> String {
+    let proof = &session.proof;
+    let title = &session.title;
+
+    let mut doc = String::new();
+    doc.push_str("\\documentclass[11pt]{article}\n");
+    doc.push_str("\\usepackage[margin=1in]{geometry}\n");
+    doc.push_str("\\usepackage{amsmath,amssymb,amsthm}\n");
+    doc.push_str("\\usepackage{listings}\n");
+    doc.push_str("\\usepackage{xcolor}\n");
+    doc.push_str("\\lstset{basicstyle=\\ttfamily\\small,breaklines=true,frame=single,backgroundcolor=\\color{gray!10}}\n");
+    doc.push_str("\\newtheorem{theorem}{Theorem}\n");
+    doc.push_str("\\newtheorem{lemma}[theorem]{Lemma}\n");
+    doc.push_str("\\newtheorem{proposition}[theorem]{Proposition}\n");
+    doc.push_str("\n");
+    doc.push_str(&format!("\\title{{{}}}\n", tex_escape(title)));
+    doc.push_str("\\author{OpenProof}\n");
+    doc.push_str("\\date{\\today}\n");
+    doc.push_str("\n\\begin{document}\n\\maketitle\n\n");
+
+    // Problem statement
+    if let Some(problem) = &proof.problem {
+        if !problem.trim().is_empty() {
+            doc.push_str("\\section*{Problem}\n");
+            doc.push_str(&tex_escape(problem));
+            doc.push_str("\n\n");
+        }
+    }
+
+    // Formal target
+    if let Some(target) = &proof.formal_target {
+        if !target.trim().is_empty() {
+            doc.push_str("\\section*{Formal Target}\n");
+            doc.push_str("\\begin{lstlisting}[language={}]\n");
+            doc.push_str(target);
+            doc.push_str("\n\\end{lstlisting}\n\n");
+        }
+    }
+
+    // Proof nodes
+    if !proof.nodes.is_empty() {
+        doc.push_str("\\section{Proof Structure}\n\n");
+        for node in &proof.nodes {
+            let env = match node.kind {
+                openproof_protocol::ProofNodeKind::Theorem => "theorem",
+                openproof_protocol::ProofNodeKind::Lemma => "lemma",
+                _ => "proposition",
+            };
+            let status_marker = match node.status {
+                openproof_protocol::ProofNodeStatus::Verified => " \\textnormal{[\\textcolor{green!70!black}{verified}]}",
+                openproof_protocol::ProofNodeStatus::Failed => " \\textnormal{[\\textcolor{red}{failed}]}",
+                openproof_protocol::ProofNodeStatus::Proving => " \\textnormal{[\\textcolor{orange}{proving}]}",
+                _ => "",
+            };
+            doc.push_str(&format!(
+                "\\begin{{{env}}}[{}]{status_marker}\n",
+                tex_escape(&node.label)
+            ));
+            if !node.statement.is_empty() {
+                doc.push_str(&tex_escape(&node.statement));
+                doc.push_str("\n");
+            }
+            doc.push_str(&format!("\\end{{{env}}}\n\n"));
+
+            if !node.content.trim().is_empty() {
+                doc.push_str("\\begin{lstlisting}[language={}]\n");
+                doc.push_str(&node.content);
+                doc.push_str("\n\\end{lstlisting}\n\n");
+            }
+        }
+    }
+
+    // Paper notes
+    if !proof.paper_notes.is_empty() {
+        doc.push_str("\\section{Notes}\n\n");
+        doc.push_str("\\begin{itemize}\n");
+        for note in &proof.paper_notes {
+            doc.push_str(&format!("\\item {}\n", tex_escape(note)));
+        }
+        doc.push_str("\\end{itemize}\n\n");
+    }
+
+    // Strategy summary
+    if let Some(strategy) = &proof.strategy_summary {
+        if !strategy.trim().is_empty() {
+            doc.push_str("\\section{Strategy}\n\n");
+            doc.push_str(&tex_escape(strategy));
+            doc.push_str("\n\n");
+        }
+    }
+
+    doc.push_str("\\end{document}\n");
+    doc
+}
+
+fn tex_escape(s: &str) -> String {
+    s.replace('\\', "\\textbackslash{}")
+        .replace('{', "\\{")
+        .replace('}', "\\}")
+        .replace('&', "\\&")
+        .replace('%', "\\%")
+        .replace('$', "\\$")
+        .replace('#', "\\#")
+        .replace('_', "\\_")
+        .replace('^', "\\^{}")
+        .replace('~', "\\~{}")
 }
 
 fn build_session_summary(session: &SessionSnapshot) -> DashboardSessionSummary {

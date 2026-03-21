@@ -8,7 +8,8 @@ use openproof_core::{AppEvent, AppState, AutonomousRunPatch, FocusPane, Submitte
 use openproof_dashboard::{open_browser, start_dashboard_server};
 use openproof_lean::{detect_lean_health, verify_active_node};
 use openproof_model::{
-    load_auth_summary, run_codex_turn, sync_auth_from_codex_cli, CodexTurnRequest, TurnMessage,
+    load_auth_summary, run_codex_turn, run_codex_turn_streaming, sync_auth_from_codex_cli,
+    CodexTurnRequest, TurnMessage,
 };
 use openproof_protocol::{
     AgentRole, AgentStatus, BranchQueueState, HealthReport, MessageRole, ProofNodeKind,
@@ -1481,22 +1482,29 @@ fn handle_submission(
     let store_for_model = store.clone();
     tokio::spawn(async move {
         let messages = build_turn_messages_with_retrieval(&store_for_model, Some(&session_snapshot)).await;
-        let result = run_codex_turn(CodexTurnRequest {
-            session_id: &submission.session_id,
-            messages: &messages,
-            model: "gpt-5.4",
-            reasoning_effort: "high",
-        })
+        // Stream deltas to the TUI so the user sees the response as it arrives
+        let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let tx_stream = tx_model.clone();
+        tokio::spawn(async move {
+            while let Some(delta) = delta_rx.recv().await {
+                let _ = tx_stream.send(AppEvent::StreamDelta(delta));
+            }
+        });
+        let result = run_codex_turn_streaming(
+            CodexTurnRequest {
+                session_id: &submission.session_id,
+                messages: &messages,
+                model: "gpt-5.4",
+                reasoning_effort: "high",
+            },
+            delta_tx,
+        )
         .await;
 
         match result {
-            Ok(text) => {
-                let content = if text.trim().is_empty() {
-                    "The model returned no visible text.".to_string()
-                } else {
-                    text
-                };
-                let _ = tx_model.send(AppEvent::AppendAssistant(content));
+            Ok(_text) => {
+                // The streaming text was accumulated via StreamDelta events.
+                // TurnFinished will flush it into AppendAssistant.
             }
             Err(error) => {
                 let _ = tx_model.send(AppEvent::AppendNotice {

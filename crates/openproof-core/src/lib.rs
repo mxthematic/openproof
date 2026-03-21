@@ -68,6 +68,8 @@ pub enum AppEvent {
         promote: bool,
         result: LeanVerificationSummary,
     },
+    StreamDelta(String),
+    StreamFinished,
     AppendAssistant(String),
     AppendBranchAssistant { branch_id: String, content: String },
     FinishBranch {
@@ -145,6 +147,8 @@ pub struct AppState {
     pub overlay: Option<Overlay>,
     /// How many transcript entries have been flushed to terminal scrollback.
     pub flushed_turn_count: usize,
+    /// Accumulates streaming model output before it's finalized.
+    pub streaming_text: String,
 }
 
 impl AppState {
@@ -188,6 +192,7 @@ impl AppState {
             completion_idx: None,
             overlay: None,
             flushed_turn_count: 0,
+            streaming_text: String::new(),
         }
     }
 
@@ -1356,18 +1361,46 @@ impl AppState {
             AppEvent::TurnStarted => {
                 self.turn_in_flight = true;
                 self.turn_started_at = Some(std::time::Instant::now());
-                self.status = "Running assistant turn in the background.".to_string();
+                self.streaming_text.clear();
+                self.status = "Running assistant turn...".to_string();
+            }
+            AppEvent::StreamDelta(delta) => {
+                self.streaming_text.push_str(&delta);
+            }
+            AppEvent::StreamFinished => {
+                let text = std::mem::take(&mut self.streaming_text);
+                if !text.trim().is_empty() {
+                    return self.apply(AppEvent::AppendAssistant(text));
+                }
             }
             AppEvent::TurnFinished => {
+                // If there's still streaming text that wasn't finalized, flush it
+                if !self.streaming_text.is_empty() {
+                    let text = std::mem::take(&mut self.streaming_text);
+                    if !text.trim().is_empty() {
+                        let _ = self.apply(AppEvent::AppendAssistant(text));
+                    }
+                }
                 self.turn_in_flight = false;
                 self.turn_started_at = None;
                 if !self.verification_in_flight {
-                    self.status = "Assistant turn finished.".to_string();
+                    self.status = "Ready.".to_string();
                 }
             }
             AppEvent::LeanVerifyStarted => {
                 self.verification_in_flight = true;
-                self.status = "Running Lean verification in the background.".to_string();
+                self.status = "Verifying with Lean...".to_string();
+                // Add visible notice so user sees verification is happening
+                let entry = TranscriptEntry {
+                    id: next_id("native_msg"),
+                    role: MessageRole::Notice,
+                    title: Some("Lean".to_string()),
+                    content: "Verifying proof candidate with Lean...".to_string(),
+                    created_at: Utc::now().to_rfc3339(),
+                };
+                if let Some(session) = self.current_session_mut() {
+                    session.transcript.push(entry);
+                }
             }
             AppEvent::LeanVerifyFinished(result) => {
                 self.verification_in_flight = false;
