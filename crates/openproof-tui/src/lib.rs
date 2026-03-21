@@ -5,7 +5,10 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{
+        Block, Borders, Clear, List, ListItem, ListState, Paragraph, Scrollbar,
+        ScrollbarOrientation, ScrollbarState, Wrap,
+    },
     Frame,
 };
 
@@ -161,6 +164,14 @@ fn draw_chat_area(f: &mut Frame<'_>, state: &mut AppState, area: Rect) {
         .wrap(Wrap { trim: false });
     f.render_widget(para, area);
 
+    // Scrollbar on the right edge
+    if total_visual > state.visible_height {
+        let mut scrollbar_state = ScrollbarState::new(max_scroll).position(scroll_from_top);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .thumb_style(Style::default().fg(Color::DarkGray))
+            .track_style(Style::default().fg(Color::Rgb(40, 40, 40)));
+        f.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    }
 }
 
 // ---------------------------------------------------------------------------
