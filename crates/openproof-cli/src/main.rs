@@ -971,12 +971,9 @@ async fn run_app(
                         MouseEventKind::ScrollDown => Some(AppEvent::ScrollTranscriptDown),
                         _ => None,
                     };
-                    // Fire 3 times for a faster scroll feel.
                     if let Some(evt) = scroll_event {
-                        for _ in 0..3 {
-                            if let Some(write) = state.apply(evt.clone()) {
-                                persist_write(tx.clone(), store.clone(), write);
-                            }
+                        if let Some(write) = state.apply(evt) {
+                            persist_write(tx.clone(), store.clone(), write);
                         }
                     }
                 }
