@@ -1440,10 +1440,8 @@ fn start_branch_verification(
     };
 
     let _ = tx.send(AppEvent::LeanVerifyStarted);
+    let project_dir = resolve_lean_project_dir();
     tokio::spawn(async move {
-        let project_dir = env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join("lean");
         let verification_clone = verification_session.clone();
         let result = tokio::task::spawn_blocking(move || verify_active_node(&project_dir, &verification_clone))
             .await
