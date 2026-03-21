@@ -29,6 +29,7 @@ enum Command {
     Health,
     Login,
     Ask { prompt: String },
+    Run { problem: String, label: Option<String> },
     Dashboard { open: bool, port: Option<u16> },
     ReclusterCorpus,
     Help,
@@ -58,6 +59,7 @@ async fn main() -> Result<()> {
         Command::Health => run_health(options.launch_cwd).await,
         Command::Login => run_login().await,
         Command::Ask { prompt } => run_ask(prompt).await,
+        Command::Run { problem, label } => run_autonomous(options.launch_cwd, problem, label).await,
         Command::Dashboard { open, port } => run_dashboard(options.launch_cwd, open, port).await,
         Command::ReclusterCorpus => run_recluster_corpus().await,
         Command::Shell => run_shell(options.launch_cwd).await,
@@ -149,6 +151,38 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions> {
         });
     }
 
+    if args.first().map(String::as_str) == Some("run") {
+        let mut problem = String::new();
+        let mut label = None;
+        let mut index = 1;
+        while index < args.len() {
+            match args[index].as_str() {
+                "--label" => {
+                    index += 1;
+                    label = args.get(index).cloned();
+                }
+                "--problem" => {
+                    index += 1;
+                    if let Some(p) = args.get(index) {
+                        problem = p.clone();
+                    }
+                }
+                other if problem.is_empty() => {
+                    problem = other.to_string();
+                }
+                _ => {}
+            }
+            index += 1;
+        }
+        if problem.trim().is_empty() {
+            bail!("openproof run requires a problem statement. Usage: openproof run \"<problem>\" [--label <name>]");
+        }
+        return Ok(CliOptions {
+            command: Command::Run { problem, label },
+            launch_cwd,
+        });
+    }
+
     Ok(CliOptions {
         command: Command::Shell,
         launch_cwd,
@@ -165,6 +199,7 @@ Usage:
   openproof health
   openproof login
   openproof ask <prompt>
+  openproof run <problem> [--label <name>]
   openproof dashboard [--open] [--port <port>]
   openproof recluster-corpus
 
@@ -228,6 +263,265 @@ async fn run_dashboard(launch_cwd: PathBuf, should_open: bool, port: Option<u16>
     }
     tokio::signal::ctrl_c().await?;
     server.close().await?;
+    Ok(())
+}
+
+/// Headless autonomous mode: set up a session, run the autonomous proof loop,
+/// and print all state changes to stderr. No TUI required.
+async fn run_autonomous(launch_cwd: PathBuf, problem: String, label: Option<String>) -> Result<()> {
+    let store = AppStore::open(StorePaths::detect()?)?;
+    let _ = store.import_legacy_sessions();
+    let workspace_label = launch_cwd
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "workspace".to_string());
+
+    let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
+
+    let sessions = store.list_sessions()?;
+    let wr = Some(launch_cwd.to_string_lossy().to_string());
+    let wl = Some(workspace_label.clone());
+    let mut state = AppState::new(sessions, String::new(), wr.clone(), wl.clone());
+
+    let title = label.unwrap_or_else(|| {
+        let preview: String = problem.chars().take(60).collect();
+        format!("auto: {preview}")
+    });
+    let write = state.create_session(Some(&title));
+    persist_write(tx.clone(), store.clone(), write);
+
+    // Load auth
+    eprintln!("[run] Loading auth...");
+    match sync_auth_from_codex_cli() {
+        Ok(Some(summary)) => {
+            let _ = state.apply(AppEvent::AuthLoaded(summary));
+        }
+        _ => {
+            if let Ok(summary) = load_auth_summary() {
+                let _ = state.apply(AppEvent::AuthLoaded(summary));
+            }
+        }
+    }
+    if !state.auth.logged_in {
+        bail!("Not authenticated. Run `openproof login` first.");
+    }
+    eprintln!("[run] Auth: {} ({})",
+        state.auth.email.as_deref().unwrap_or("unknown"),
+        state.auth.plan.as_deref().unwrap_or("?"));
+
+    // Load lean health
+    let lean_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join("lean");
+    let lean_dir_clone = lean_dir.clone();
+    if let Ok(health) = tokio::task::spawn_blocking(move || detect_lean_health(&lean_dir_clone)).await? {
+        let _ = state.apply(AppEvent::LeanLoaded(health));
+    }
+    eprintln!("[run] Lean: ok={}, version={}",
+        state.lean.ok,
+        state.lean.lean_version.as_deref().unwrap_or("?"));
+
+    // Submit problem as user message
+    eprintln!("[run] Problem: {problem}");
+    let submitted = state.submit_text(problem.clone());
+    if let Some(input) = submitted {
+        if let Some(session) = state.current_session().cloned() {
+            let s = store.clone();
+            let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
+        }
+
+        // Initial model turn
+        let session = state.current_session().cloned().unwrap();
+        let messages = build_turn_messages_with_retrieval(&store, Some(&session)).await;
+        eprintln!("[run] Running initial model turn...");
+        let _ = state.apply(AppEvent::TurnStarted);
+        match run_codex_turn(CodexTurnRequest {
+            session_id: &session.id,
+            messages: &messages,
+            model: "gpt-5.4",
+            reasoning_effort: "high",
+        }).await {
+            Ok(text) => {
+                eprintln!("[run] Response ({} chars, {} lines)", text.len(), text.lines().count());
+                for line in text.lines().take(15) {
+                    eprintln!("  | {line}");
+                }
+                if text.lines().count() > 15 {
+                    eprintln!("  | ... ({} more lines)", text.lines().count() - 15);
+                }
+                let _ = state.apply(AppEvent::AppendAssistant(text));
+                let _ = state.apply(AppEvent::TurnFinished);
+            }
+            Err(e) => {
+                eprintln!("[run] Model error: {e}");
+                let _ = state.apply(AppEvent::TurnFinished);
+            }
+        }
+        if let Some(session) = state.current_session().cloned() {
+            let s = store.clone();
+            let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
+        }
+    }
+
+    // Report extracted state
+    let session = state.current_session().cloned().unwrap();
+    eprintln!("[run] Phase: {}", session.proof.phase);
+    eprintln!("[run] Formal target: {:?}", session.proof.formal_target);
+    eprintln!("[run] Accepted target: {:?}", session.proof.accepted_target);
+    eprintln!("[run] Nodes: {}", session.proof.nodes.len());
+    for node in &session.proof.nodes {
+        eprintln!("[run]   {} [{:?}]: {}", node.label, node.status, node.statement);
+    }
+
+    if session.proof.formal_target.is_none() && session.proof.accepted_target.is_none() && session.proof.nodes.is_empty() {
+        eprintln!("[run] No target extracted. Adding theorem node from problem.");
+        let _ = state.add_proof_node(ProofNodeKind::Theorem, &title, &problem);
+    }
+
+    // Start autonomous
+    eprintln!("\n[run] === Starting autonomous loop ===\n");
+    if let Ok(write) = state.set_autonomous_run_state(AutonomousRunPatch {
+        is_autonomous_running: Some(true),
+        autonomous_iteration_count: Some(0),
+        autonomous_started_at: Some(Some(chrono::Utc::now().to_rfc3339())),
+        autonomous_pause_reason: Some(None),
+        autonomous_stop_reason: Some(None),
+        ..AutonomousRunPatch::default()
+    }) {
+        persist_write(tx.clone(), store.clone(), write);
+    }
+
+    let max_iterations = 12;
+    for iteration in 1..=max_iterations {
+        let session = state.current_session().cloned().unwrap();
+        if !session.proof.is_autonomous_running {
+            eprintln!("[run] Autonomous stopped: {:?}", session.proof.autonomous_pause_reason);
+            break;
+        }
+        if let Some(reason) = autonomous_stop_reason(&session) {
+            eprintln!("[run] Stop: {reason}");
+            break;
+        }
+
+        eprintln!("\n[run] --- Iteration {iteration}/{max_iterations} ---");
+        eprintln!("[run] Phase={}, Branches={}, Nodes={}",
+            session.proof.phase, session.proof.branches.len(), session.proof.nodes.len());
+
+        match run_autonomous_step(tx.clone(), store.clone(), &mut state) {
+            Ok(summary) => {
+                for line in summary.lines() {
+                    eprintln!("[run] {line}");
+                }
+            }
+            Err(reason) => {
+                eprintln!("[run] Step error: {reason}");
+                break;
+            }
+        }
+
+        // Drain events until all branches settle
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
+        loop {
+            match tokio::time::timeout(Duration::from_millis(500), rx.recv()).await {
+                Ok(Some(event)) => {
+                    match &event {
+                        AppEvent::AppendBranchAssistant { branch_id, content } => {
+                            let lean_count = content.matches("```lean").count();
+                            eprintln!("[run] Branch {branch_id}: {len} chars, {lean_count} lean block(s)",
+                                len = content.len());
+                        }
+                        AppEvent::FinishBranch { branch_id, status, summary, .. } => {
+                            eprintln!("[run] Branch {branch_id} finished: {status:?} -- {summary}");
+                        }
+                        AppEvent::LeanVerifyStarted => {
+                            eprintln!("[run] Lean verification started...");
+                        }
+                        AppEvent::LeanVerifyFinished(r) => {
+                            eprintln!("[run] Verify: ok={}, code={:?}", r.ok, r.code);
+                            if !r.ok {
+                                for l in r.stderr.lines().take(3) { eprintln!("[run]   {l}"); }
+                            }
+                        }
+                        AppEvent::BranchVerifyFinished { branch_id, result, promote, .. } => {
+                            if result.ok {
+                                eprintln!("[run] *** BRANCH {branch_id} VERIFIED (promote={promote}) ***");
+                            } else {
+                                eprintln!("[run] Branch {branch_id} verify failed");
+                                for l in result.stderr.lines().take(3) { eprintln!("[run]   {l}"); }
+                            }
+                        }
+                        AppEvent::AppendNotice { title, content } => {
+                            eprintln!("[run] {title}: {}", &content[..content.len().min(200)]);
+                        }
+                        AppEvent::PersistSucceeded(_) | AppEvent::PersistFailed(_) => {}
+                        _ => {}
+                    }
+                    if let Some(write) = state.apply(event) {
+                        persist_write(tx.clone(), store.clone(), write);
+                    }
+                    // Check if settled
+                    let s = state.current_session().cloned().unwrap();
+                    let all_done = s.proof.branches.iter().all(|b|
+                        !matches!(b.status, AgentStatus::Running));
+                    if all_done && !state.turn_in_flight && !state.verification_in_flight {
+                        break;
+                    }
+                }
+                Ok(None) => break,
+                Err(_) => {
+                    let s = state.current_session().cloned().unwrap();
+                    let running = s.proof.branches.iter().filter(|b| b.status == AgentStatus::Running).count();
+                    if running == 0 && !state.turn_in_flight && !state.verification_in_flight {
+                        break;
+                    }
+                    if tokio::time::Instant::now() > deadline {
+                        eprintln!("[run] Timeout waiting for tasks.");
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Persist
+        if let Some(session) = state.current_session().cloned() {
+            let s = store.clone();
+            let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
+        }
+
+        // Check for verified nodes
+        let session = state.current_session().cloned().unwrap();
+        let verified: Vec<_> = session.proof.nodes.iter()
+            .filter(|n| n.status == openproof_protocol::ProofNodeStatus::Verified)
+            .collect();
+        if !verified.is_empty() {
+            eprintln!("\n[run] *** {} node(s) VERIFIED ***", verified.len());
+            for node in &verified {
+                eprintln!("[run] {}: {}", node.label, node.statement);
+                eprintln!("{}", node.content);
+            }
+            break;
+        }
+    }
+
+    // Final summary
+    let session = state.current_session().cloned().unwrap();
+    eprintln!("\n[run] === Summary ===");
+    eprintln!("[run] Session: {} ({})", session.title, session.id);
+    eprintln!("[run] Phase: {}", session.proof.phase);
+    eprintln!("[run] Iterations: {}", session.proof.autonomous_iteration_count);
+    eprintln!("[run] Nodes: {}", session.proof.nodes.len());
+    for n in &session.proof.nodes {
+        eprintln!("[run]   {} [{:?}]", n.label, n.status);
+    }
+    eprintln!("[run] Branches: {}", session.proof.branches.len());
+    for b in &session.proof.branches {
+        eprintln!("[run]   {} [{:?}] score={:.1} attempts={}", b.title, b.status, b.score, b.attempt_count);
+    }
+    let corpus = store.get_corpus_summary()?;
+    eprintln!("[run] Corpus: verified={}, user_verified={}, attempts={}",
+        corpus.verified_entry_count, corpus.user_verified_count, corpus.attempt_log_count);
+
+    // Persist final
+    let s = store.clone();
+    let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
     Ok(())
 }
 
