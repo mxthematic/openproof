@@ -73,6 +73,7 @@ pub async fn run_app(
                 )),
                 _ => None,
             };
+            let is_assistant_append = matches!(&event, AppEvent::AppendAssistant(_));
             let finished_branch_id = match &event {
                 AppEvent::FinishBranch { branch_id, .. } => Some(branch_id.clone()),
                 _ => None,
@@ -159,6 +160,46 @@ pub async fn run_app(
                             let _ = tx.send(AppEvent::AutonomousTick);
                         }
                     }
+                }
+            }
+
+            // After AppendAssistant: if lean code was extracted, auto-verify it.
+            if is_assistant_append && !state.verification_in_flight {
+                // Extract what we need before mutating state.
+                let verify_info = state.current_session().and_then(|s| {
+                    let node = s.proof.active_node_id.as_deref()
+                        .and_then(|id| s.proof.nodes.iter().find(|n| n.id == id))?;
+                    if node.status == openproof_protocol::ProofNodeStatus::Proving
+                        && !node.content.trim().is_empty()
+                    {
+                        Some((s.id.clone(), node.content.clone(), s.proof.imports.clone()))
+                    } else {
+                        None
+                    }
+                });
+                if let Some((session_id, node_content, imports)) = verify_info {
+                    let _ = store.write_scratch(&session_id, &node_content);
+                    let _ = state.apply(AppEvent::LeanVerifyStarted);
+                    let tx_v = tx.clone();
+                    let lean_dir = crate::helpers::resolve_lean_project_dir();
+                    tokio::spawn(async move {
+                        let result = tokio::task::spawn_blocking(move || {
+                            openproof_lean::verify_scratch_content(
+                                &lean_dir, &node_content, None, &imports,
+                            )
+                        })
+                        .await
+                        .ok()
+                        .and_then(|r| r.ok());
+                        let summary = result.unwrap_or_else(|| {
+                            openproof_protocol::LeanVerificationSummary {
+                                ok: false,
+                                error: Some("Lean verification failed to run".to_string()),
+                                ..Default::default()
+                            }
+                        });
+                        let _ = tx_v.send(AppEvent::LeanVerifyFinished(summary));
+                    });
                 }
             }
         }
