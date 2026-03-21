@@ -151,6 +151,57 @@ pub fn run_autonomous_step(
             target
         );
         let title = format!("{} repair", latest_session.title);
+
+        // Build enriched repair context
+        let mut repair_context = format!(
+            "{description}\n\nLatest diagnostics:\n{}",
+            basis.last_lean_diagnostic
+        );
+
+        // Extract sorry goal states from the failing code
+        if !basis.lean_snippet.trim().is_empty() {
+            let project_dir = crate::helpers::resolve_lean_project_dir();
+            let rendered = openproof_lean::render_node_scratch(
+                &latest_session,
+                latest_session.proof.nodes.first().unwrap_or(&openproof_protocol::ProofNode::default()),
+            );
+            if let Ok(goals) = openproof_lean::extract_sorry_goals(&project_dir, &rendered) {
+                if !goals.is_empty() {
+                    repair_context.push_str("\n\nUnsolved goals at sorry points:\n");
+                    for (line, goal) in &goals {
+                        repair_context.push_str(&format!("  Line {line}: {goal}\n"));
+                    }
+                }
+            }
+
+            // After 2+ repair attempts, try lean_suggest for exact?/apply?
+            if basis.attempt_count >= 2 {
+                if let Ok(suggestions) = openproof_lean::run_tactic_suggestions(
+                    &project_dir, &rendered, "exact?",
+                ) {
+                    if !suggestions.is_empty() {
+                        repair_context.push_str("\n\nLean's own suggestions (via exact?):\n");
+                        for s in suggestions.iter().take(5) {
+                            repair_context.push_str(&format!("  {s}\n"));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Include failed path history
+        let target_label = latest_session.proof.nodes.first()
+            .map(|n| n.label.as_str())
+            .unwrap_or(&latest_session.title);
+        if let Ok(failed) = store.failed_attempts_for_target(target_label, 5) {
+            if !failed.is_empty() {
+                repair_context.push_str("\n\nPrevious failed approaches (do NOT repeat these):\n");
+                for (class, snippet, diag) in &failed {
+                    repair_context.push_str(&format!("  [{class}] {snippet}\n    -> {diag}\n"));
+                }
+            }
+        }
+
         let (branch_id, session_snapshot) = ensure_hidden_agent_branch(
             tx.clone(),
             store.clone(),
@@ -163,10 +214,7 @@ pub fn run_autonomous_step(
             tx,
             store,
             AgentRole::Repairer,
-            format!(
-                "{description}\n\nLatest diagnostics:\n{}",
-                basis.last_lean_diagnostic
-            ),
+            repair_context,
             branch_id.clone(),
             branch_id.clone(),
             session_snapshot,
