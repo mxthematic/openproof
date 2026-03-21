@@ -1,6 +1,8 @@
 pub use rusqlite;
 
 mod corpus;
+mod corpus_seed;
+mod corpus_sync;
 mod extract;
 mod schema;
 mod sessions;
@@ -107,7 +109,7 @@ theorem NativeTruth : True := by
 def helperValue : Nat :=
   1
 "#;
-        let items = corpus::extract_library_seed_items(source);
+        let items = corpus_seed::extract_library_seed_items(source);
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].decl_name, "NativeTruth");
         assert_eq!(items[0].kind, "theorem");
