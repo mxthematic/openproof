@@ -373,17 +373,27 @@ pub async fn run_autonomous(
     let max_iterations = 100; // Open problems need many iterations
     for iteration in 1..=max_iterations {
         let session = state.current_session().cloned().unwrap();
-        if !session.proof.is_autonomous_running {
-            eprintln!(
-                "[run] Autonomous stopped: {:?}",
-                session.proof.autonomous_pause_reason
-            );
+
+        // Headless mode: only stop when ALL nodes are verified or clarification needed
+        let all_verified = !session.proof.nodes.is_empty()
+            && session.proof.nodes.iter().all(|n| n.status == openproof_protocol::ProofNodeStatus::Verified);
+        if all_verified {
+            eprintln!("[run] All proof nodes verified!");
             break;
         }
-        // In headless mode, always use full_autonomous=true (only stop when ALL nodes verified)
-        if let Some(reason) = crate::helpers::autonomous_stop_reason_with_mode(&session, true) {
-            eprintln!("[run] Stop: {reason}");
+        if session.proof.pending_question.is_some() || session.proof.awaiting_clarification {
+            eprintln!("[run] Paused for clarification.");
             break;
+        }
+
+        // Re-enable autonomous running if it got turned off by the step function
+        if !session.proof.is_autonomous_running {
+            if let Some(s) = state.current_session_mut() {
+                s.proof.is_autonomous_running = true;
+                s.proof.phase = "proving".to_string();
+                s.proof.autonomous_pause_reason = None;
+                s.proof.autonomous_stop_reason = None;
+            }
         }
 
         eprintln!("\n[run] --- Iteration {iteration}/{max_iterations} ---");
