@@ -668,10 +668,10 @@ pub async fn drain_until_settled(
             Ok(Some(event)) => {
                 let mut finished_branch_id: Option<String> = None;
                 match &event {
-                    AppEvent::AppendBranchAssistant { branch_id, content } => {
+                    AppEvent::AppendBranchAssistant { branch_id, content, used_tools } => {
                         let lean_count = content.matches("```lean").count();
                         eprintln!(
-                            "[run] Branch {branch_id}: {len} chars, {lean_count} lean block(s)",
+                            "[run] Branch {branch_id}: {len} chars, {lean_count} lean block(s), tools={used_tools}",
                             len = content.len()
                         );
                     }

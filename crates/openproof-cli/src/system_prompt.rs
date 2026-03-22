@@ -425,7 +425,10 @@ pub async fn build_branch_turn_messages(
             format!("You are the {} branch for OpenProof.", agent_role_label(role)),
             format!("Branch id: {branch_id}"),
             format!("Task: {title}"),
-            "Respond with concrete progress only. Use structured markers like PHASE, STATUS, NEXT, PAPER, THEOREM, LEMMA, and fenced ```lean``` blocks when useful."
+            "You have tools: file_read, file_write, file_patch, lean_verify, lean_check, lean_search_tactic, corpus_search, workspace_ls. \
+             Use file_read to see current code. Use file_patch for targeted fixes. Use lean_verify to check. \
+             NEVER output lean code in text -- always use file_write or file_patch to modify files. \
+             NEVER overwrite a file that has working code -- use file_patch to add/modify specific parts."
                 .to_string(),
             match role {
                 AgentRole::Planner => {

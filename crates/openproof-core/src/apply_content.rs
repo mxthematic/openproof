@@ -14,6 +14,7 @@ impl AppState {
             return None;
         }
         let parsed = parse_assistant_output(text);
+        let tools_active = self.tool_loop_active;
         let entry = TranscriptEntry {
             id: next_id("native_msg"),
             role: MessageRole::Assistant,
@@ -132,35 +133,44 @@ impl AppState {
                     session.proof.nodes.push(node);
                 }
             }
-            if let Some(candidate) = parsed
-                .lean_snippets
-                .first()
-                .cloned()
-                .or_else(|| extract_lean_code_block(text))
-            {
-                let active_node_id = session.proof.active_node_id.clone();
-                if let Some(node_id) = active_node_id {
-                    if let Some(node) = session
-                        .proof
-                        .nodes
-                        .iter_mut()
-                        .find(|node| node.id == node_id)
-                    {
-                        node.content = candidate;
-                        node.status = ProofNodeStatus::Proving;
-                        node.updated_at = session.updated_at.clone();
-                        session.proof.phase = "proving".to_string();
-                        session.proof.goal_summary = Some(node.statement.clone());
-                        session.proof.status_line =
-                            format!("Updated Lean candidate for {}.", node.label);
+            // When tools are active, workspace files are the source of truth.
+            // Do NOT extract lean code blocks from text -- that destroys working code.
+            let mut lean_applied = false;
+            if !tools_active {
+                if let Some(candidate) = parsed
+                    .lean_snippets
+                    .first()
+                    .cloned()
+                    .or_else(|| extract_lean_code_block(text))
+                {
+                    lean_applied = true;
+                    let active_node_id = session.proof.active_node_id.clone();
+                    if let Some(node_id) = active_node_id {
+                        if let Some(node) = session
+                            .proof
+                            .nodes
+                            .iter_mut()
+                            .find(|node| node.id == node_id)
+                        {
+                            node.content = candidate;
+                            node.status = ProofNodeStatus::Proving;
+                            node.updated_at = session.updated_at.clone();
+                            session.proof.phase = "proving".to_string();
+                            session.proof.goal_summary = Some(node.statement.clone());
+                            session.proof.status_line =
+                                format!("Updated Lean candidate for {}.", node.label);
+                        }
                     }
                 }
-            } else if let Some(next_step) = parsed
-                .next_steps
-                .first()
-                .filter(|item| !item.trim().is_empty())
-            {
-                session.proof.status_line = next_step.trim().to_string();
+            }
+            if !lean_applied {
+                if let Some(next_step) = parsed
+                    .next_steps
+                    .first()
+                    .filter(|item| !item.trim().is_empty())
+                {
+                    session.proof.status_line = next_step.trim().to_string();
+                }
             }
             (session.clone(), session.proof.status_line.clone())
         }) {
@@ -176,6 +186,7 @@ impl AppState {
         &mut self,
         branch_id: String,
         content: String,
+        used_tools: bool,
     ) -> Option<PendingWrite> {
         let text = content.trim();
         if text.is_empty() {
@@ -210,73 +221,78 @@ impl AppState {
                     branch.phase = Some(phase.trim().to_string());
                     branch.progress_kind = Some(phase.trim().to_string());
                 }
-                // Check for patch format first -- surgical edits preferred over full rewrites
-                let snippet_from_patch = if openproof_lean::patch::contains_patch(text) {
-                    if let Some(patch_text) = openproof_lean::patch::extract_patch(text) {
-                        let current = session.proof.last_rendered_scratch
-                            .as_deref()
-                            .or_else(|| session.proof.nodes.iter()
-                                .find(|n| Some(n.id.as_str()) == session.proof.active_node_id.as_deref())
-                                .map(|n| n.content.as_str()))
-                            .unwrap_or("");
-                        openproof_lean::patch::apply_patch(current, &patch_text)
-                            .map(|result| {
-                                // Add patch diff as a visible notice
-                                session.transcript.push(TranscriptEntry {
-                                    id: next_id("native_msg"),
-                                    role: MessageRole::Notice,
-                                    title: Some("Patch".to_string()),
-                                    content: format!(
-                                        "Applied patch: {}\n{}",
-                                        result.diff_summary.lines().next().unwrap_or(""),
-                                        result.diff_summary.lines().skip(1).take(6).collect::<Vec<_>>().join("\n"),
-                                    ),
-                                    created_at: now.clone(),
-                                });
-                                result.patched_content
-                            })
+                // When tools were used, workspace files are the source of truth.
+                // Do NOT extract lean code from text -- that destroys working code
+                // written by file_write/file_patch tools.
+                if !used_tools {
+                    // Check for patch format first -- surgical edits preferred over full rewrites
+                    let snippet_from_patch = if openproof_lean::patch::contains_patch(text) {
+                        if let Some(patch_text) = openproof_lean::patch::extract_patch(text) {
+                            let current = session.proof.last_rendered_scratch
+                                .as_deref()
+                                .or_else(|| session.proof.nodes.iter()
+                                    .find(|n| Some(n.id.as_str()) == session.proof.active_node_id.as_deref())
+                                    .map(|n| n.content.as_str()))
+                                .unwrap_or("");
+                            openproof_lean::patch::apply_patch(current, &patch_text)
+                                .map(|result| {
+                                    // Add patch diff as a visible notice
+                                    session.transcript.push(TranscriptEntry {
+                                        id: next_id("native_msg"),
+                                        role: MessageRole::Notice,
+                                        title: Some("Patch".to_string()),
+                                        content: format!(
+                                            "Applied patch: {}\n{}",
+                                            result.diff_summary.lines().next().unwrap_or(""),
+                                            result.diff_summary.lines().skip(1).take(6).collect::<Vec<_>>().join("\n"),
+                                        ),
+                                        created_at: now.clone(),
+                                    });
+                                    result.patched_content
+                                })
+                        } else {
+                            None
+                        }
                     } else {
                         None
-                    }
-                } else {
-                    None
-                };
+                    };
 
-                if let Some(snippet) = snippet_from_patch
-                    .or_else(|| parsed.lean_snippets.first().cloned())
-                    .or_else(|| extract_lean_code_block(text))
-                {
-                    branch.lean_snippet = snippet.clone();
-                    branch.search_status = "candidate updated".to_string();
+                    if let Some(snippet) = snippet_from_patch
+                        .or_else(|| parsed.lean_snippets.first().cloned())
+                        .or_else(|| extract_lean_code_block(text))
+                    {
+                        branch.lean_snippet = snippet.clone();
+                        branch.search_status = "candidate updated".to_string();
 
-                    // Visible notice: agent found a lean candidate
-                    let snippet_lines = snippet.lines().count();
-                    let role_label = agent_role_label(branch.role);
-                    session.transcript.push(TranscriptEntry {
-                        id: next_id("native_msg"),
-                        role: MessageRole::Notice,
-                        title: Some("Lean".to_string()),
-                        content: format!("{role_label} produced Lean candidate ({snippet_lines} lines). Verifying..."),
-                        created_at: now.clone(),
-                    });
-                    branch.progress_kind = Some(
-                        if branch.role == openproof_protocol::AgentRole::Repairer {
-                            "repairing".to_string()
-                        } else {
-                            "candidate".to_string()
-                        },
-                    );
-                    if let Some(focus_node_id) = branch.focus_node_id.clone().or(active_node_id) {
-                        if let Some(node) = session
-                            .proof
-                            .nodes
-                            .iter_mut()
-                            .find(|node| node.id == focus_node_id)
-                        {
-                            node.content = snippet;
-                            node.status = ProofNodeStatus::Proving;
-                            node.updated_at = now.clone();
-                            session.proof.active_node_id = Some(node.id.clone());
+                        // Visible notice: agent found a lean candidate
+                        let snippet_lines = snippet.lines().count();
+                        let role_label = agent_role_label(branch.role);
+                        session.transcript.push(TranscriptEntry {
+                            id: next_id("native_msg"),
+                            role: MessageRole::Notice,
+                            title: Some("Lean".to_string()),
+                            content: format!("{role_label} produced Lean candidate ({snippet_lines} lines). Verifying..."),
+                            created_at: now.clone(),
+                        });
+                        branch.progress_kind = Some(
+                            if branch.role == openproof_protocol::AgentRole::Repairer {
+                                "repairing".to_string()
+                            } else {
+                                "candidate".to_string()
+                            },
+                        );
+                        if let Some(focus_node_id) = branch.focus_node_id.clone().or(active_node_id) {
+                            if let Some(node) = session
+                                .proof
+                                .nodes
+                                .iter_mut()
+                                .find(|node| node.id == focus_node_id)
+                            {
+                                node.content = snippet;
+                                node.status = ProofNodeStatus::Proving;
+                                node.updated_at = now.clone();
+                                session.proof.active_node_id = Some(node.id.clone());
+                            }
                         }
                     }
                 }

@@ -72,8 +72,8 @@ impl AppState {
             AppEvent::AppendAssistant(content) => {
                 return self.apply_append_assistant(content);
             }
-            AppEvent::AppendBranchAssistant { branch_id, content } => {
-                return self.apply_append_branch_assistant(branch_id, content);
+            AppEvent::AppendBranchAssistant { branch_id, content, used_tools } => {
+                return self.apply_append_branch_assistant(branch_id, content, used_tools);
             }
             AppEvent::FinishBranch {
                 branch_id,

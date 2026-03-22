@@ -242,6 +242,7 @@ pub fn start_agent_branch_turn(
         let imports = session_snapshot.proof.imports.clone();
         let mut all_messages = messages;
         let mut accumulated_text = String::new();
+        let mut turn_used_tools = false;
 
         for _iteration in 0..MAX_TOOL_ITERATIONS {
             let result = run_codex_turn_with_events(
@@ -262,6 +263,7 @@ pub fn start_agent_branch_turn(
                     if turn.tool_calls.is_empty() {
                         break;
                     }
+                    turn_used_tools = true;
                     // Add function_call items THEN tool results (required by Responses API)
                     for call in &turn.tool_calls {
                         all_messages.push(TurnMessage::FunctionCall {
@@ -344,6 +346,7 @@ pub fn start_agent_branch_turn(
         let _ = tx.send(AppEvent::AppendBranchAssistant {
             branch_id: branch_id.clone(),
             content,
+            used_tools: turn_used_tools,
         });
         let _ = tx.send(AppEvent::FinishBranch {
             branch_id,

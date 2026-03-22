@@ -71,7 +71,7 @@ pub enum AppEvent {
     StreamFinished,
     ReasoningStarted,
     AppendAssistant(String),
-    AppendBranchAssistant { branch_id: String, content: String },
+    AppendBranchAssistant { branch_id: String, content: String, used_tools: bool },
     FinishBranch {
         branch_id: String,
         status: AgentStatus,
