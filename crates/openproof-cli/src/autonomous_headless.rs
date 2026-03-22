@@ -234,7 +234,8 @@ pub async fn run_autonomous(
     }
 
     // Direct verification: check if the initial response contains compilable lean code.
-    {
+    // Skip when resuming -- the existing code already verified, we want to push further.
+    if resume.is_none() {
         let session = state.current_session().cloned().unwrap();
         let mut lean_candidates: Vec<String> = session
             .proof
