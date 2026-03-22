@@ -21,7 +21,7 @@ enum Command {
     Health,
     Login,
     Ask { prompt: String },
-    Run { problem: String, label: Option<String> },
+    Run { problem: String, label: Option<String>, resume: Option<String> },
     Dashboard { open: bool, port: Option<u16> },
     ReclusterCorpus,
     IngestCorpus,
@@ -44,8 +44,8 @@ async fn main() -> Result<()> {
         Command::Health => run_health(options.launch_cwd).await,
         Command::Login => run_login().await,
         Command::Ask { prompt } => run_ask(prompt).await,
-        Command::Run { problem, label } => {
-            autonomous_headless::run_autonomous(options.launch_cwd, problem, label).await
+        Command::Run { problem, label, resume } => {
+            autonomous_headless::run_autonomous(options.launch_cwd, problem, label, resume).await
         }
         Command::Dashboard { open, port } => run_dashboard(options.launch_cwd, open, port).await,
         Command::ReclusterCorpus => run_recluster_corpus().await,
@@ -164,6 +164,7 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions> {
     if args.first().map(String::as_str) == Some("run") {
         let mut problem = String::new();
         let mut label = None;
+        let mut resume = None;
         let mut index = 1;
         while index < args.len() {
             match args[index].as_str() {
@@ -171,24 +172,28 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions> {
                     index += 1;
                     label = args.get(index).cloned();
                 }
+                "--resume" => {
+                    index += 1;
+                    resume = args.get(index).cloned();
+                }
                 "--problem" => {
                     index += 1;
                     if let Some(p) = args.get(index) {
                         problem = p.clone();
                     }
                 }
-                other if problem.is_empty() => {
+                other if problem.is_empty() && resume.is_none() => {
                     problem = other.to_string();
                 }
                 _ => {}
             }
             index += 1;
         }
-        if problem.trim().is_empty() {
-            bail!("openproof run requires a problem statement. Usage: openproof run \"<problem>\" [--label <name>]");
+        if problem.trim().is_empty() && resume.is_none() {
+            bail!("openproof run requires a problem or --resume <session_id>. Usage: openproof run \"<problem>\" [--label <name>] [--resume <id>]");
         }
         return Ok(CliOptions {
-            command: Command::Run { problem, label },
+            command: Command::Run { problem, label, resume },
             launch_cwd,
         });
     }

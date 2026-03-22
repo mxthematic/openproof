@@ -61,7 +61,8 @@ pub fn handle_submission(
 }
 
 /// Run the agentic loop: call the model, execute tool calls, repeat.
-async fn run_agentic_loop(
+/// Public so headless runner can use it too.
+pub async fn run_agentic_loop(
     tx: mpsc::UnboundedSender<AppEvent>,
     store: AppStore,
     session_id: &str,

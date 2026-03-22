@@ -10,11 +10,10 @@ use crate::helpers::{
     resolve_lean_project_dir,
 };
 use crate::system_prompt::build_turn_messages_with_retrieval;
+use crate::turn_handling::run_agentic_loop;
 use anyhow::{bail, Result};
 use openproof_core::{AppEvent, AppState, AutonomousRunPatch};
-use openproof_model::{
-    load_auth_summary, run_codex_turn, sync_auth_from_codex_cli, CodexTurnRequest,
-};
+use openproof_model::{load_auth_summary, sync_auth_from_codex_cli};
 use openproof_protocol::{MessageRole, ProofNodeKind};
 use openproof_store::{AppStore, StorePaths};
 use std::path::PathBuf;
@@ -24,6 +23,7 @@ pub async fn run_autonomous(
     launch_cwd: PathBuf,
     problem: String,
     label: Option<String>,
+    resume: Option<String>,
 ) -> Result<()> {
     let store = AppStore::open(StorePaths::detect()?)?;
     let _ = store.import_legacy_sessions();
@@ -39,12 +39,24 @@ pub async fn run_autonomous(
     let wl = Some(workspace_label.clone());
     let mut state = AppState::new(sessions, String::new(), wr.clone(), wl.clone());
 
-    let title = label.unwrap_or_else(|| {
-        let preview: String = problem.chars().take(60).collect();
-        format!("auto: {preview}")
-    });
-    let write = state.create_session(Some(&title));
-    persist_write(tx.clone(), store.clone(), write);
+    // Resume existing session or create new one
+    if let Some(ref session_id) = resume {
+        eprintln!("[run] Resuming session: {session_id}");
+        if let Err(e) = state.switch_session(session_id) {
+            bail!("Could not resume session {session_id}: {e}");
+        }
+        let session = state.current_session().cloned().unwrap();
+        eprintln!("[run] Session: {} ({})", session.title, session.id);
+        eprintln!("[run] Phase: {}, Nodes: {}, Branches: {}",
+            session.proof.phase, session.proof.nodes.len(), session.proof.branches.len());
+    } else {
+        let title = label.unwrap_or_else(|| {
+            let preview: String = problem.chars().take(60).collect();
+            format!("auto: {preview}")
+        });
+        let write = state.create_session(Some(&title));
+        persist_write(tx.clone(), store.clone(), write);
+    }
 
     // Load auth
     eprintln!("[run] Loading auth...");
@@ -82,9 +94,13 @@ pub async fn run_autonomous(
         state.lean.lean_version.as_deref().unwrap_or("?")
     );
 
-    // Submit problem as user message
+    // Submit problem and run initial agentic turn (skip if resuming)
+    if resume.is_some() {
+        eprintln!("[run] Resuming -- skipping initial turn.");
+    }
+    let should_submit = resume.is_none();
     eprintln!("[run] Problem: {problem}");
-    let submitted = state.submit_text(problem.clone());
+    let submitted = if should_submit { state.submit_text(problem.clone()) } else { None };
     if let Some(_input) = submitted {
         if let Some(session) = state.current_session().cloned() {
             let s = store.clone();
@@ -93,36 +109,36 @@ pub async fn run_autonomous(
 
         let session = state.current_session().cloned().unwrap();
         let messages = build_turn_messages_with_retrieval(&store, Some(&session)).await;
-        eprintln!("[run] Running initial model turn...");
+        eprintln!("[run] Running initial agentic turn (with tools: lean_verify, file_write, corpus_search, etc.)...");
         let _ = state.apply(AppEvent::TurnStarted);
-        match run_codex_turn(CodexTurnRequest {
-            session_id: &session.id,
-            messages: &messages,
-            model: "gpt-5.4",
-            reasoning_effort: "high",
-        })
-        .await
-        {
-            Ok(text) => {
-                eprintln!(
-                    "[run] Response ({} chars, {} lines)",
-                    text.len(),
-                    text.lines().count()
-                );
-                for line in text.lines().take(15) {
-                    eprintln!("  | {line}");
+
+        // Use the full agentic loop so the model can write files, verify, patch, search
+        run_agentic_loop(
+            tx.clone(),
+            store.clone(),
+            &session.id,
+            messages,
+            &session,
+        )
+        .await;
+
+        // Drain events produced by the agentic loop
+        while let Ok(event) = rx.try_recv() {
+            match &event {
+                AppEvent::AppendAssistant(text) => {
+                    eprintln!("[run] Assistant ({} chars, {} lines)", text.len(), text.lines().count());
+                    for line in text.lines().take(15) {
+                        eprintln!("  | {line}");
+                    }
                 }
-                if text.lines().count() > 15 {
-                    eprintln!("  | ... ({} more lines)", text.lines().count() - 15);
+                AppEvent::AppendNotice { title, content } => {
+                    eprintln!("[run] {title}: {}", &content[..content.len().min(200)]);
                 }
-                let _ = state.apply(AppEvent::AppendAssistant(text));
-                let _ = state.apply(AppEvent::TurnFinished);
+                _ => {}
             }
-            Err(e) => {
-                eprintln!("[run] Model error: {e}");
-                let _ = state.apply(AppEvent::TurnFinished);
-            }
+            let _ = state.apply(event);
         }
+        let _ = state.apply(AppEvent::TurnFinished);
         if let Some(session) = state.current_session().cloned() {
             let s = store.clone();
             let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
@@ -147,7 +163,8 @@ pub async fn run_autonomous(
         && session.proof.nodes.is_empty()
     {
         eprintln!("[run] No target extracted. Adding theorem node from problem.");
-        let _ = state.add_proof_node(ProofNodeKind::Theorem, &title, &problem);
+        let node_label = state.current_session().map(|s| s.title.clone()).unwrap_or_else(|| "Goal".to_string());
+        let _ = state.add_proof_node(ProofNodeKind::Theorem, &node_label, &problem);
     }
 
     // Auto-accept target if none accepted yet
