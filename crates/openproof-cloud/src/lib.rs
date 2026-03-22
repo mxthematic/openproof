@@ -25,7 +25,13 @@ fn parse_enabled_flag(value: &str) -> bool {
     matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
 }
 
-/// Check remote corpus availability from env vars or explicit options.
+/// Default production corpus URL -- bundled into the client.
+/// Users don't need to configure anything; they just opt into community mode.
+const DEFAULT_CORPUS_URL: &str = "https://openproof-cloud-production.up.railway.app";
+
+/// Check remote corpus availability.
+/// The corpus URL is bundled by default. Users can override with env vars
+/// or disable with OPENPROOF_ENABLE_REMOTE_CORPUS=0.
 pub fn get_remote_corpus_availability(
     base_url_override: Option<&str>,
     enable_flag_override: Option<&str>,
@@ -33,13 +39,13 @@ pub fn get_remote_corpus_availability(
     let enable_flag = enable_flag_override
         .map(String::from)
         .or_else(|| std::env::var("OPENPROOF_ENABLE_REMOTE_CORPUS").ok())
-        .unwrap_or_default();
+        .unwrap_or_else(|| "1".to_string()); // Enabled by default
     let enabled_by_flag = parse_enabled_flag(&enable_flag);
 
     let raw_url = base_url_override
         .map(String::from)
         .or_else(|| std::env::var("OPENPROOF_CORPUS_URL").ok())
-        .unwrap_or_default();
+        .unwrap_or_else(|| DEFAULT_CORPUS_URL.to_string());
     let base_url = normalize_base_url(&raw_url);
 
     if !enabled_by_flag {
