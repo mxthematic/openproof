@@ -380,7 +380,8 @@ pub async fn run_autonomous(
             );
             break;
         }
-        if let Some(reason) = autonomous_stop_reason(&session) {
+        // In headless mode, always use full_autonomous=true (only stop when ALL nodes verified)
+        if let Some(reason) = crate::helpers::autonomous_stop_reason_with_mode(&session, true) {
             eprintln!("[run] Stop: {reason}");
             break;
         }
