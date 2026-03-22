@@ -252,26 +252,51 @@ pub fn start_agent_branch_turn(
                     }
                     // Execute tool calls for the branch.
                     for call in &turn.tool_calls {
-                        let output = tokio::task::spawn_blocking({
-                            let name = call.name.clone();
-                            let arguments = call.arguments.clone();
-                            let project_dir = project_dir.clone();
-                            let workspace_dir = workspace_dir.clone();
-                            let imports = imports.clone();
-                            move || {
-                                let ctx = ToolContext {
-                                    project_dir: &project_dir,
-                                    workspace_dir: &workspace_dir,
-                                    imports: &imports,
-                                };
-                                execute_tool(&name, &arguments, &ctx)
+                        let output = if call.name == "corpus_search" {
+                            let query = serde_json::from_str::<serde_json::Value>(&call.arguments)
+                                .ok()
+                                .and_then(|v| v.get("query").and_then(|q| q.as_str()).map(str::to_string))
+                                .unwrap_or_default();
+                            let mut results = Vec::new();
+                            if let Ok(hits) = store.search_verified_corpus(&query, 10) {
+                                for (label, statement, _) in &hits {
+                                    results.push(format!("- {label} :: {statement}"));
+                                }
                             }
-                        })
-                        .await
-                        .unwrap_or_else(|_| ToolOutput {
-                            success: false,
-                            content: "Tool execution panicked".to_string(),
-                        });
+                            let cloud = openproof_cloud::CloudCorpusClient::new(Default::default());
+                            if let Ok(hits) = cloud.search_semantic(&query, 10).await {
+                                for h in &hits {
+                                    if !results.iter().any(|r| r.contains(&h.label)) {
+                                        results.push(format!("- {} (sim:{:.2}) :: {}", h.label, h.score, h.statement));
+                                    }
+                                }
+                            }
+                            ToolOutput {
+                                success: true,
+                                content: if results.is_empty() { "No results.".to_string() } else { results.join("\n") },
+                            }
+                        } else {
+                            tokio::task::spawn_blocking({
+                                let name = call.name.clone();
+                                let arguments = call.arguments.clone();
+                                let project_dir = project_dir.clone();
+                                let workspace_dir = workspace_dir.clone();
+                                let imports = imports.clone();
+                                move || {
+                                    let ctx = ToolContext {
+                                        project_dir: &project_dir,
+                                        workspace_dir: &workspace_dir,
+                                        imports: &imports,
+                                    };
+                                    execute_tool(&name, &arguments, &ctx)
+                                }
+                            })
+                            .await
+                            .unwrap_or_else(|_| ToolOutput {
+                                success: false,
+                                content: "Tool execution panicked".to_string(),
+                            })
+                        };
                         all_messages.push(TurnMessage::tool_result(
                             &call.call_id,
                             &output.content,
