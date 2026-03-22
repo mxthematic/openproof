@@ -84,7 +84,25 @@ pub async fn run_app(
                     .map(|_| write.session.clone());
                 persist_write(tx.clone(), store.clone(), write);
                 if let (Some(result), Some(session)) = (verification_result, verification_session) {
-                    persist_verification_result(tx.clone(), store.clone(), session, result);
+                    let verified_ok = result.ok;
+                    persist_verification_result(tx.clone(), store.clone(), session.clone(), result);
+
+                    // Auto-sync to cloud after successful verification
+                    if verified_ok
+                        && session.cloud.sync_enabled
+                        && session.cloud.share_mode != openproof_protocol::ShareMode::Local
+                    {
+                        let store_sync = store.clone();
+                        let share_mode = session.cloud.share_mode;
+                        tokio::spawn(async move {
+                            let corpus = openproof_corpus::CorpusManager::new(
+                                store_sync,
+                                openproof_cloud::CloudCorpusClient::new(Default::default()),
+                                std::path::PathBuf::from("."),
+                            );
+                            let _ = corpus.drain_sync_queue(share_mode, true, None).await;
+                        });
+                    }
                 }
             }
             if let Some((branch_id, _focus_node_id, _promote, _result)) = branch_verification {

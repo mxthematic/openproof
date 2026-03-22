@@ -391,6 +391,26 @@ pub async fn run_autonomous(
 
     let s = store.clone();
     let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
+
+    // Auto-sync to cloud if enabled
+    let session = state.current_session().cloned().unwrap();
+    if session.cloud.sync_enabled && session.cloud.share_mode != openproof_protocol::ShareMode::Local {
+        eprintln!("[run] Syncing to cloud corpus...");
+        let corpus_mgr = openproof_corpus::CorpusManager::new(
+            store.clone(),
+            openproof_cloud::CloudCorpusClient::new(Default::default()),
+            std::path::PathBuf::from("."),
+        );
+        match corpus_mgr.drain_sync_queue(session.cloud.share_mode, true, None).await {
+            Ok(result) => {
+                eprintln!("[run] Synced: {} sent, {} failed", result.sent, result.failed);
+            }
+            Err(e) => {
+                eprintln!("[run] Sync error: {e}");
+            }
+        }
+    }
+
     Ok(())
 }
 

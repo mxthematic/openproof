@@ -107,9 +107,11 @@ pub fn build_system_prompt(session: Option<&SessionSnapshot>) -> String {
             "- `file_read`: Read a file from the workspace.\n",
             "- `file_write`: Write or create a file in the workspace.\n",
             "- `file_patch`: Apply a surgical patch to a file.\n",
-            "- `workspace_ls`: List workspace files.\n\n",
+            "- `workspace_ls`: List workspace files.\n",
+            "- `corpus_search`: Search the verified mathematical corpus (190K+ Mathlib lemmas + user proofs). Use to find exact lemma names, relevant theorems, or check what proof approaches have been tried before.\n\n",
             "Workflow: Write code with file_write, verify with lean_verify, fix errors with file_patch, repeat. ",
             "Use lean_check to look up exact lemma names instead of guessing. Use lean_search_tactic at sorry positions. ",
+            "Use corpus_search to find relevant Mathlib lemmas by concept (e.g. 'prime divisor factorial') or by name fragment (e.g. 'Nat.Prime.dvd'). ",
             "You can iterate multiple times within a single turn: write, verify, see errors, fix, verify again.",
         ).to_string(),
         concat!(

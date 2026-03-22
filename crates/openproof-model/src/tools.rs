@@ -16,6 +16,7 @@ pub fn tool_definitions() -> Vec<Value> {
         file_write_tool(),
         file_patch_tool(),
         workspace_ls_tool(),
+        corpus_search_tool(),
     ]
 }
 
@@ -166,6 +167,25 @@ fn file_patch_tool() -> Value {
                 }
             },
             "required": ["path", "patch"],
+            "additionalProperties": false
+        }
+    })
+}
+
+fn corpus_search_tool() -> Value {
+    json!({
+        "type": "function",
+        "name": "corpus_search",
+        "description": "Search the verified mathematical corpus for relevant lemmas, theorems, definitions, and previously failed attempts. Use this to find existing Mathlib results, look up exact lemma names, or check what proof approaches have been tried before. The corpus contains 190,000+ verified Mathlib declarations plus user-verified proofs.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query: a theorem name (e.g. 'Nat.Prime.dvd_factorial'), mathematical concept (e.g. 'prime divisor of factorial'), or Lean type signature fragment (e.g. 'Nat.Prime → dvd → le')"
+                }
+            },
+            "required": ["query"],
             "additionalProperties": false
         }
     })

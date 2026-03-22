@@ -126,27 +126,60 @@ async fn run_agentic_loop(
                         arguments: call.arguments.clone(),
                     });
 
-                    // Execute the tool on a blocking thread.
-                    let output = tokio::task::spawn_blocking({
-                        let name = call.name.clone();
-                        let arguments = call.arguments.clone();
-                        let project_dir = project_dir.clone();
-                        let workspace_dir = workspace_dir.clone();
-                        let imports = imports.clone();
-                        move || {
-                            let ctx = ToolContext {
-                                project_dir: &project_dir,
-                                workspace_dir: &workspace_dir,
-                                imports: &imports,
-                            };
-                            execute_tool(&name, &arguments, &ctx)
+                    // corpus_search is handled specially (needs store + async cloud client)
+                    let output = if call.name == "corpus_search" {
+                        let query = serde_json::from_str::<serde_json::Value>(&call.arguments)
+                            .ok()
+                            .and_then(|v| v.get("query").and_then(|q| q.as_str()).map(str::to_string))
+                            .unwrap_or_default();
+                        let mut results = Vec::new();
+
+                        // Local FTS search
+                        if let Ok(local_hits) = store.search_verified_corpus(&query, 10) {
+                            for (label, statement, _vis) in &local_hits {
+                                results.push(format!("- {label} :: {statement}"));
+                            }
                         }
-                    })
-                    .await
-                    .unwrap_or_else(|_| ToolOutput {
-                        success: false,
-                        content: "Tool execution panicked".to_string(),
-                    });
+
+                        // Cloud semantic search
+                        let cloud_client = openproof_cloud::CloudCorpusClient::new(Default::default());
+                        if let Ok(semantic_hits) = cloud_client.search_semantic(&query, 10).await {
+                            for hit in &semantic_hits {
+                                let line = format!("- {} (sim:{:.2}) :: {}", hit.label, hit.score, hit.statement);
+                                if !results.iter().any(|r| r.contains(&hit.label)) {
+                                    results.push(line);
+                                }
+                            }
+                        }
+
+                        if results.is_empty() {
+                            ToolOutput { success: true, content: "No results found.".to_string() }
+                        } else {
+                            ToolOutput { success: true, content: results.join("\n") }
+                        }
+                    } else {
+                        // All other tools: execute on a blocking thread
+                        tokio::task::spawn_blocking({
+                            let name = call.name.clone();
+                            let arguments = call.arguments.clone();
+                            let project_dir = project_dir.clone();
+                            let workspace_dir = workspace_dir.clone();
+                            let imports = imports.clone();
+                            move || {
+                                let ctx = ToolContext {
+                                    project_dir: &project_dir,
+                                    workspace_dir: &workspace_dir,
+                                    imports: &imports,
+                                };
+                                execute_tool(&name, &arguments, &ctx)
+                            }
+                        })
+                        .await
+                        .unwrap_or_else(|_| ToolOutput {
+                            success: false,
+                            content: "Tool execution panicked".to_string(),
+                        })
+                    };
 
                     // Emit tool result event for transcript.
                     let _ = tx.send(AppEvent::ToolResultReceived {
