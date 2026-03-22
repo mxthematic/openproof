@@ -1,154 +1,118 @@
 # openproof
 
-`openproof` is a Rust-first, local-first formal math agent for Lean 4. The native shell, native store, native dashboard server, and verified artifacts stay visible while Lean owns final verification.
-
-## Crates
-
-- `crates/openproof-cli` -- main CLI binary with TUI event loop and command system
-- `crates/openproof-tui` -- terminal UI rendering (ratatui)
-- `crates/openproof-core` -- application state machine and event handling
-- `crates/openproof-store` -- SQLite persistence (sessions, corpus, sync queue)
-- `crates/openproof-protocol` -- shared types (serde-serializable, no I/O)
-- `crates/openproof-model` -- ChatGPT Codex API integration and authentication
-- `crates/openproof-lean` -- Lean toolchain interaction and verification
-- `crates/openproof-dashboard` -- HTTP dashboard server (Axum)
-- `crates/openproof-cloud` -- HTTP client for the remote corpus API
-- `crates/openproof-corpus` -- corpus orchestration (lake ingestion, search, sync)
-- `crates/openproof-corpus-server` -- shared corpus HTTP server with quarantine and reverification
-
-Run the product with:
-
-```bash
-./bin/openproof
+```
+  ___                   ____                    __
+ / _ \ _ __   ___ _ __ |  _ \ _ __ ___   ___  / _|
+| | | | '_ \ / _ \ '_ \| |_) | '__/ _ \ / _ \| |_
+| |_| | |_) |  __/ | | |  __/| | | (_) | (_) |  _|
+ \___/| .__/ \___|_| |_|_|   |_|  \___/ \___/|_|
+      |_|
 ```
 
-## Cloud Boundary
+Formal math proofs, conversationally.
 
-The public `openproof` repo is client-side and local-first:
+## What is this
 
-- TUI and dashboard
-- local verified corpus and cache
-- local Lean verification
-- public shared-corpus wire types and HTTP client
-- local development reference server
+openproof is an open-source conversational theorem prover. Describe a mathematical theorem in natural language, and openproof works with frontier LLMs to produce a machine-checked Lean 4 proof using Mathlib. Every proof candidate is verified by the Lean type checker -- if it passes, it's correct.
 
-Prelaunch policy:
+## Features
 
-- `local` is the default and intended mode
-- `community` and `private` remain visible, but are dev-gated
-- remote corpus behavior is only enabled when both `OPENPROOF_ENABLE_REMOTE_CORPUS=1` and `OPENPROOF_CORPUS_URL` are set
-- corpus auth is kept separate from ChatGPT/Codex model auth
+- **Conversational** -- describe theorems in plain language, iterate interactively
+- **Machine-checked** -- every proof verified by the Lean 4 type checker, no hallucinated results
+- **Autonomous mode** -- set a target and let it plan, prove, verify, and repair on its own
+- **Live dashboard** -- web dashboard with proof node graph and compiled PDF paper
+- **Verified corpus** -- growing searchable library of proven lemmas, retrieved automatically for future proofs
+- **Bring your own compute** -- works with your existing model subscriptions (ChatGPT, OpenAI API, Anthropic)
+- **Local-first** -- sessions, proofs, and corpus stored locally in SQLite
 
-The production shared corpus moat is not meant to live here. The canonical verified corpus service, reverification pipeline, ranking logic, secrets, and infrastructure belong in a private `openproof-cloud` repo.
+## Quick start
 
-## Corpus modes
+### Prerequisites
 
-`openproof` supports three corpus modes in the public client:
+- [Rust](https://rustup.rs/) (stable)
+- [Lean 4](https://leanprover.github.io/lean4/doc/setup.html) with [Mathlib](https://github.com/leanprover-community/mathlib4)
 
-- `local`: fully local only. Search, verification, and corpus growth stay on disk in `~/.openproof`.
-- `community`: opt into the hosted shared corpus. The product model is contribution-for-access: users contribute structured verified artifacts in exchange for shared-corpus retrieval.
-- `private`: use a tenant-scoped hosted corpus. Private uploads stay private, and community overlay is optional for retrieval.
-
-Important boundaries:
-
-- the public repo does not ship the production corpus service
-- raw chat logs are not the default contribution unit
-- only structured verified artifacts are part of the shared-corpus contribution flow
-- traces and failed attempts remain local/internal telemetry, not shared retrieval data
-- the near-term self-host story is local-first open source, not a full self-hosted hosted-corpus stack
-
-## Setup
+### Install
 
 ```bash
-cd lean && lake update
-cd ..
-cargo build --workspace
+cargo install --path crates/openproof-cli
 ```
 
-Lean verification depends on a populated local Lean 4 + mathlib environment. The pinned project lives in [`lean`](./lean).
+Or build from source:
 
-## Usage
+```bash
+git clone https://github.com/markm39/openproof.git
+cd openproof
+cd lean && lake update && cd ..
+cargo build --release
+```
+
+### Run
 
 ```bash
 openproof
-openproof health
-openproof login
-openproof dashboard --open
-openproof recluster-corpus
 ```
 
-Corpus server (separate binary):
+On first launch, a setup wizard guides you through model provider selection and corpus mode.
 
-```bash
-cargo run -p openproof-corpus-server -- --port 4832
-```
+## Usage
 
-## Interactive commands
+Type a math problem or theorem statement to start. openproof parses it, formalizes a Lean target, and iterates toward a verified proof.
 
-- `/help`
-- `/status`
-- `/login`
-- `/logout`
-- `/mode benchmark|research`
-- `/model [name]`
-- `/plan`
-- `/compact`
-- `/proof`
-- `/share local|community|private`
-- `/share overlay [on|off]`
-- `/instructions`
-- `/memory`
-- `/remember <text>`
-- `/remember global <text>`
-- `/paper [tex]`
-- `/new <title>`
-- `/resume <session-id>`
-- `/theorem <label> :: <statement>`
-- `/lemma <label> :: <statement>`
-- `/verify`
-- `/agents`
-- `/tasks`
-- `/branches`
-- `/focus <branch-id|node-id|clear>`
-- `/agent spawn <role> <task>`
-- `/export paper|tex|lean|all`
-- `/corpus status`
-- `/corpus ingest`
-- `/corpus recluster`
-- `/sync status|enable|disable|drain`
-- `/autonomous start|stop|status|step`
-- `/sessions`
-- `/dashboard`
-- `/feedback`
+### Commands
 
-Keybindings:
+| Command | Description |
+|---------|-------------|
+| `/help` | Show all commands |
+| `/status` | Current session status |
+| `/proof` | Show proof state |
+| `/verify` | Manually trigger Lean verification |
+| `/dashboard` | Open web dashboard in browser |
+| `/autonomous start` | Start autonomous proving loop |
+| `/autonomous stop` | Stop autonomous loop |
+| `/new <title>` | Start a new session |
+| `/resume` | Switch session (interactive picker) |
+| `/sessions` | List all sessions |
+| `/corpus ingest` | Import Mathlib declarations into corpus |
+| `/export paper` | Export proof as LaTeX paper |
 
-- `Ctrl+C` interrupts the active foreground model turn
-- `Ctrl+D` exits the TUI
-- `Shift+Tab` cycles shell mode between `default` and `plan`
-- `Esc` clears the current input
+### Keyboard shortcuts
 
-Any non-command line is treated as a chat turn. The proof graph is preserved across the chat and is stored independently from the transcript.
+| Key | Action |
+|-----|--------|
+| Up/Down | Browse input history |
+| Esc | Abort current turn / clear input |
+| Ctrl+C | Clear input (first), quit (second) |
+| `/` | Enter command mode (with tab completion) |
+| PageUp/PageDown | Scroll through conversation |
 
-`openproof` also loads inherited `AGENTS.md` files and persistent memory:
+## Corpus
 
-- global memory: `~/.openproof/memory/global.md`
-- workspace memory: `~/.openproof/memory/workspaces/<workspace-hash>.md`
+openproof maintains a verified corpus -- a searchable database of proven Lean declarations. When working on a new proof, relevant lemmas are automatically retrieved from the corpus and included in the model's context.
 
-## OAuth notes
+**Cloud mode** (recommended): Your verified proofs contribute to a shared corpus. In return, you get access to all community-verified lemmas. The more people prove, the better it gets.
 
-`openproof` first tries to reuse an existing Codex CLI ChatGPT login from `~/.codex/auth.json` or the macOS Codex credential store. If no reusable Codex session is present, it falls back to its own browser-based ChatGPT OAuth flow.
+**Local mode**: Corpus stays on your machine. Mathlib declarations are auto-imported on setup. No network calls.
 
-The implementation follows the documented Codex login shape:
+## Architecture
 
-- Codex caches ChatGPT login details locally and reuses them across runs
-- browser login is the default sign-in flow when no cached session is available
-- the CLI uses a localhost callback to return the OAuth result
-- active ChatGPT sessions are refreshed and cached locally
+| Crate | Purpose |
+|-------|---------|
+| `openproof-cli` | Binary: TUI shell, commands, setup wizard |
+| `openproof-tui` | Terminal rendering (ratatui) with inline viewport |
+| `openproof-core` | Application state machine and event handling |
+| `openproof-store` | SQLite persistence (sessions, corpus, sync) |
+| `openproof-protocol` | Shared types (serde-serializable) |
+| `openproof-model` | LLM API integration |
+| `openproof-lean` | Lean toolchain interaction and verification |
+| `openproof-dashboard` | Web dashboard server (Axum) |
+| `openproof-cloud` | Remote corpus API client |
+| `openproof-corpus` | Corpus orchestration (ingestion, search) |
 
-Sources:
+## Contributing
 
-- https://developers.openai.com/codex/auth/
-- https://developers.openai.com/codex/cli/reference/#codex-login
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Headless device-code auth is not implemented yet. Right now `openproof` assumes a local browser-capable environment.
+## License
+
+MIT -- see [LICENSE](LICENSE).
