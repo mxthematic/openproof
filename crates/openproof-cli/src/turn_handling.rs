@@ -351,8 +351,7 @@ pub fn start_branch_verification(
                     if persisted.is_none() {
                         let _ = persist_tx.send(AppEvent::AppendNotice {
                             title: "Verification Store Error".to_string(),
-                            content: "Could not persist the branch verification outcome."
-                                .to_string(),
+                            content: "Could not persist branch verification.".to_string(),
                         });
                     }
                     // Embed + index verified items (fire-and-forget)
@@ -536,15 +535,21 @@ pub fn persist_verification_result(
     tokio::spawn(async move {
         let outcome =
             tokio::task::spawn_blocking(move || store.record_verification_result(&session, &result))
-                .await
-                .ok()
-                .and_then(Result::ok);
-        if outcome.is_none() {
-            let _ = tx.send(AppEvent::AppendNotice {
-                title: "Verification Store Error".to_string(),
-                content: "Could not persist the verification outcome into the native corpus store."
-                    .to_string(),
-            });
+                .await;
+        match outcome {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                let _ = tx.send(AppEvent::AppendNotice {
+                    title: "Verification Store Error".to_string(),
+                    content: format!("Could not persist: {e}"),
+                });
+            }
+            Err(e) => {
+                let _ = tx.send(AppEvent::AppendNotice {
+                    title: "Verification Store Error".to_string(),
+                    content: format!("Task panicked: {e}"),
+                });
+            }
         }
     });
 }
