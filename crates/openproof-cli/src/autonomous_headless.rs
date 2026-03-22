@@ -324,7 +324,7 @@ pub async fn run_autonomous(
         persist_write(tx.clone(), store.clone(), write);
     }
 
-    let max_iterations = 12;
+    let max_iterations = 100; // Open problems need many iterations
     for iteration in 1..=max_iterations {
         let session = state.current_session().cloned().unwrap();
         if !session.proof.is_autonomous_running {
