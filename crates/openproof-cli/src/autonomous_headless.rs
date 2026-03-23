@@ -556,6 +556,12 @@ pub async fn run_autonomous(
         }
     }
 
+    // Paper is auto-generated in persist_write on every save.
+    // Force a final save to ensure paper_tex is populated.
+    if let Some(session) = state.current_session().cloned() {
+        persist_write(tx.clone(), store.clone(), openproof_core::PendingWrite { session });
+    }
+
     let session = state.current_session().cloned().unwrap();
     eprintln!("\n[run] === Summary ===");
     eprintln!("[run] Session: {} ({})", session.title, session.id);

@@ -256,6 +256,7 @@ pub async fn run_app(
                                     }
                                 }
                             }
+                            // Paper is auto-generated in persist_write on every save
                         }
                         if let Some(session) = state.current_session().cloned() {
                             let s = store.clone();

@@ -23,6 +23,14 @@ pub fn persist_write(
     write: PendingWrite,
 ) {
     let session_id = write.session.id.clone();
+    // Regenerate paper_tex from current state before saving
+    let mut session = write.session;
+    session.proof.paper_tex = generate_paper_tex(
+        &session.title,
+        session.proof.problem.as_deref().unwrap_or(""),
+        &session.proof.nodes,
+    );
+    let write = PendingWrite { session };
     tokio::spawn(async move {
         let outcome = tokio::task::spawn_blocking(move || store.save_session(&write.session))
             .await
@@ -387,4 +395,67 @@ pub fn embed_verified_item(
             .upsert_item(&identity_key, &label, &statement, &decl_kind, &module_name, &artifact_content, embedding)
             .await;
     });
+}
+
+/// Generate a LaTeX paper body from the current proof state.
+/// Called on every session save so the paper is always up to date.
+pub fn generate_paper_tex(
+    title: &str,
+    problem: &str,
+    nodes: &[openproof_protocol::ProofNode],
+) -> String {
+    if nodes.is_empty() {
+        return String::new();
+    }
+    let mut tex = String::new();
+    tex.push_str(&format!("\\section{{{}}}\n\n", escape_latex(title)));
+    if !problem.is_empty() {
+        tex.push_str(&format!("\\subsection*{{Problem}}\n{}\n\n", escape_latex(problem)));
+    }
+    for node in nodes {
+        let env = match node.kind {
+            openproof_protocol::ProofNodeKind::Theorem => "theorem",
+            openproof_protocol::ProofNodeKind::Lemma => "lemma",
+            _ => "proposition",
+        };
+        let status_str = match node.status {
+            openproof_protocol::ProofNodeStatus::Verified => "Verified in Lean 4.",
+            openproof_protocol::ProofNodeStatus::Failed => "Proof attempt failed.",
+            openproof_protocol::ProofNodeStatus::Proving => "Proof in progress.",
+            _ => "Pending.",
+        };
+        tex.push_str(&format!(
+            "\\begin{{{env}}}[{}]\n{}\n\\end{{{env}}}\n",
+            escape_latex(&node.label),
+            escape_latex(&node.statement),
+        ));
+        tex.push_str(&format!("\\textit{{{status_str}}}\n\n"));
+        if !node.content.trim().is_empty() {
+            tex.push_str("\\begin{lstlisting}[language=Lean]\n");
+            let code = if node.content.len() > 3000 {
+                &node.content[..3000]
+            } else {
+                &node.content
+            };
+            tex.push_str(code);
+            if node.content.len() > 3000 {
+                tex.push_str("\n% ... (truncated)");
+            }
+            tex.push_str("\n\\end{lstlisting}\n\n");
+        }
+    }
+    tex
+}
+
+fn escape_latex(s: &str) -> String {
+    s.replace('\\', "\\textbackslash{}")
+        .replace('{', "\\{")
+        .replace('}', "\\}")
+        .replace('&', "\\&")
+        .replace('%', "\\%")
+        .replace('$', "\\$")
+        .replace('#', "\\#")
+        .replace('_', "\\_")
+        .replace('~', "\\textasciitilde{}")
+        .replace('^', "\\textasciicircum{}")
 }
