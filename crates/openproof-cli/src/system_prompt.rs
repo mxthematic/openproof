@@ -111,19 +111,23 @@ fn tools_and_workflow_section() -> &'static str {
         "- `corpus_search(query)`: Search 190K+ verified Mathlib declarations + user proofs. Use for finding lemmas.\n",
         "- Web search (built-in): Search for papers, ArXiv preprints, MathOverflow when stuck on a proof strategy.\n\n",
 
-        "### Workflow\n",
-        "1. Create initial files with `file_write` -- skeleton with `sorry` for hard parts.\n",
-        "2. `lean_verify` to check the skeleton compiles.\n",
-        "3. `file_read` the file, then `file_patch` to fill in sorrys one at a time.\n",
-        "4. `lean_verify` after each patch. Read the error, patch that spot.\n",
-        "5. Use `lean_check` / `corpus_search` / `lean_search_tactic` when stuck on a specific goal.\n",
+        "### Workflow -- FOLLOW THIS EXACTLY\n",
+        "Your VERY FIRST tool call MUST be file_write to create a .lean file. No exceptions.\n",
+        "Do NOT call corpus_search, lean_check, or any research tool before writing your first file.\n\n",
+        "1. `file_write` -- create Lean file(s) with skeleton. Use `sorry` for hard parts.\n",
+        "2. `lean_verify` -- check the skeleton compiles.\n",
+        "3. `file_read` then `file_patch` -- fill in sorrys one at a time.\n",
+        "4. `lean_verify` after each patch. Read the error at the specific line, patch that spot.\n",
+        "5. Use `lean_check` / `corpus_search` / `lean_search_tactic` ONLY when stuck on a specific goal.\n",
         "6. Repeat 3-5. Every modification is a patch, never a full rewrite.\n\n",
 
         "RULES:\n",
-        "- file_patch is your primary tool. file_write is only for new files.\n",
-        "- Always read before patching. Never patch blind.\n",
-        "- Use sorry for uncertain parts. Verify skeleton, then fill sorrys one by one.\n",
-        "- Always verify with lean_verify after changes. Never claim correctness without checking.",
+        "- Your first tool call is ALWAYS file_write. Not corpus_search. Not lean_check. Not workspace_ls.\n",
+        "- file_patch is your primary editing tool. file_write is only for creating new files.\n",
+        "- Always file_read before file_patch. Never patch blind.\n",
+        "- Use sorry liberally. Verify skeleton, fill sorrys one by one.\n",
+        "- Research tools (corpus_search, lean_check, web search) are for when you're stuck, not for planning.\n",
+        "- Always lean_verify after changes.",
     )
 }
 
