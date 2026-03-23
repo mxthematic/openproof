@@ -181,6 +181,92 @@ pub async fn run_app(
                 }
             }
 
+            // After AppendAssistant or TurnFinished: ensure nodes exist and workspace is synced.
+            // This mirrors what the headless runner does but was missing in TUI mode.
+            let is_turn_finished = matches!(&event, AppEvent::TurnFinished);
+            if is_turn_finished || is_assistant_append {
+                if let Some(session) = state.current_session().cloned() {
+                    // Create a node if none exist (headless fallback equivalent)
+                    if session.proof.nodes.is_empty() {
+                        let label = if session.title != "OpenProof Rust Session" && !session.title.trim().is_empty() {
+                            session.title.clone()
+                        } else {
+                            session.proof.accepted_target.as_ref()
+                                .or(session.proof.formal_target.as_ref())
+                                .cloned()
+                                .unwrap_or_else(|| "Goal".to_string())
+                        };
+                        let statement = session.proof.accepted_target.as_ref()
+                            .or(session.proof.formal_target.as_ref())
+                            .or(session.proof.problem.as_ref())
+                            .cloned()
+                            .unwrap_or_else(|| label.clone());
+                        if let Ok(write) = state.add_proof_node(
+                            openproof_protocol::ProofNodeKind::Theorem,
+                            &label,
+                            &statement,
+                        ) {
+                            persist_write(tx.clone(), store.clone(), write);
+                        }
+                    }
+
+                    // Sync workspace .lean files to node content
+                    let ws_dir = store.workspace_dir(&session.id);
+                    let mut all_lean = String::new();
+                    if let Ok(files) = store.list_workspace_files(&session.id) {
+                        for (path, _) in &files {
+                            if path.ends_with(".lean") && !path.contains("history/") {
+                                if let Ok(content) = std::fs::read_to_string(ws_dir.join(path)) {
+                                    if !all_lean.is_empty() {
+                                        all_lean.push_str("\n\n");
+                                    }
+                                    all_lean.push_str(&content);
+                                }
+                            }
+                        }
+                    }
+                    if !all_lean.trim().is_empty() {
+                        if let Some(s) = state.current_session_mut() {
+                            // Ensure active_node_id is set
+                            if s.proof.active_node_id.is_none() {
+                                if let Some(first) = s.proof.nodes.first() {
+                                    s.proof.active_node_id = Some(first.id.clone());
+                                }
+                            }
+                            if let Some(node_id) = s.proof.active_node_id.clone() {
+                                if let Some(node) = s.proof.nodes.iter_mut().find(|n| n.id == node_id) {
+                                    if node.content.trim().is_empty() || node.content != all_lean {
+                                        node.content = all_lean.clone();
+                                        if all_lean.contains("sorry") && node.status == openproof_protocol::ProofNodeStatus::Verified {
+                                            node.status = openproof_protocol::ProofNodeStatus::Proving;
+                                        }
+                                    }
+                                }
+                            }
+                            // Extract title from workspace file comments if still default
+                            if s.title == "OpenProof Rust Session" || s.title.trim().is_empty() {
+                                for line in all_lean.lines() {
+                                    let trimmed = line.trim();
+                                    if let Some(title) = trimmed.strip_prefix("TITLE:").or_else(|| trimmed.strip_prefix("TITLE :")) {
+                                        let title = title.trim();
+                                        if !title.is_empty() {
+                                            s.title = title.to_string();
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(session) = state.current_session().cloned() {
+                            let s = store.clone();
+                            tokio::spawn(async move {
+                                let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
+                            });
+                        }
+                    }
+                }
+            }
+
             // After AppendAssistant: if lean code was extracted, auto-verify it.
             if is_assistant_append && !state.verification_in_flight {
                 // Extract what we need before mutating state.
