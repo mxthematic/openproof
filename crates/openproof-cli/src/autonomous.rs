@@ -542,7 +542,11 @@ pub fn run_autonomous_step(
         .map(|item| item.trim().is_empty())
         .unwrap_or(true)
     {
-        let description = format!("{branch_context}Refine a proof plan for {target}.");
+        let description = format!(
+            "{branch_context}Write an INFORMAL PROOF SKETCH for: {target}\n\n\
+             Research the proof technique. Identify the key mathematical insight. \
+             Decompose into lemmas. Write the sketch as comments in the Lean file using file_patch."
+        );
         let title = format!("{} planner", latest_session.title);
         let (branch_id, session_snapshot) = ensure_hidden_agent_branch(
             tx.clone(),

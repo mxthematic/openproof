@@ -115,23 +115,42 @@ fn tools_and_workflow_section() -> &'static str {
         "Use python3 for numerical exploration. Timeout: 30s.\n",
         "- Web search (built-in): Search for papers, ArXiv preprints, MathOverflow.\n\n",
 
+        "### Proof strategy (CRITICAL for hard problems)\n",
+        "For any non-trivial proof, follow this strategy:\n\n",
+        "**Phase 1 -- Informal sketch**: Before writing ANY Lean code, write a natural language proof plan ",
+        "as comments. Research the proof technique (web search, corpus_search, shell_run with sage). ",
+        "Identify the key mathematical ideas, intermediate lemmas, and which Mathlib results you'll need.\n\n",
+        "**Phase 2 -- Decompose with sorry**: Formalize the sketch as a chain of `have` statements:\n",
+        "```lean\ntheorem main : P := by\n",
+        "  -- Step 1: establish key bound\n",
+        "  have step1 : ... := by sorry\n",
+        "  -- Step 2: apply to our setting\n",
+        "  have step2 : ... := by sorry\n",
+        "  -- Combine\n",
+        "  exact combine step1 step2\n```\n",
+        "Verify the skeleton compiles (sorrys are OK). This proves the LOGIC is right.\n\n",
+        "**Phase 3 -- Fill sorrys one at a time**: Pick the easiest sorry, fill it with file_patch, ",
+        "lean_verify. Repeat. Use lean_search_tactic on stuck goals. Each sorry filled is real progress.\n\n",
+        "**Phase 4 -- Iterate**: If a sorry seems impossible, decompose IT further into sub-have statements. ",
+        "Use shell_run with sage/python to check small cases computationally. ",
+        "Use corpus_search to find relevant Mathlib lemmas for specific goal types.\n\n",
+
         "### Workflow\n",
         "If the workspace is EMPTY (no .lean files yet):\n",
-        "1. `file_write` to create your initial files (Defs.lean, Main.lean, etc.) with `sorry` for hard parts.\n",
-        "2. `lean_verify` to check the skeleton compiles.\n\n",
+        "1. Research the proof technique (web search, shell_run, corpus_search).\n",
+        "2. `file_write` to create files with informal comments + sorry skeleton.\n",
+        "3. `lean_verify` to check the skeleton compiles.\n\n",
         "If the workspace already HAS files:\n",
-        "1. `workspace_ls` to see what exists.\n",
-        "2. `file_read` to see the current code.\n",
-        "3. `file_patch` to make your changes. NEVER create a new file if you can patch an existing one.\n",
-        "4. `lean_verify` after each patch.\n\n",
-        "In both cases, iterate: file_read -> file_patch -> lean_verify -> repeat.\n",
-        "Use `lean_check` / `corpus_search` / `lean_search_tactic` / `shell_run` when stuck.\n\n",
+        "1. `workspace_ls` then `file_read` to see current code.\n",
+        "2. `file_patch` to fill a sorry or fix an error.\n",
+        "3. `lean_verify` after each patch.\n\n",
+        "Iterate: file_read -> file_patch -> lean_verify -> repeat.\n\n",
 
         "RULES:\n",
         "- file_patch is your primary tool. file_write is ONLY for creating files that don't exist yet.\n",
-        "- NEVER create a new file when you could patch an existing one. 3-5 files max in a project.\n",
+        "- NEVER create a new file when you could patch an existing one.\n",
         "- Always file_read before file_patch.\n",
-        "- Use sorry liberally at first. Verify skeleton, fill sorrys one by one.\n",
+        "- Decompose hard proofs into `have` chains with sorry. Fill sorrys one by one.\n",
         "- Always lean_verify after changes.",
     )
 }
@@ -470,7 +489,12 @@ pub async fn build_branch_turn_messages(
                 .to_string(),
             match role {
                 AgentRole::Planner => {
-                    "Focus on strategy refinement, decomposition, and lemma planning.".to_string()
+                    concat!(
+                        "Write an INFORMAL PROOF SKETCH. Research the proof technique using web search and shell_run. ",
+                        "Then decompose the proof into a chain of lemmas/steps. For each step, describe the mathematical strategy in natural language. ",
+                        "Write this as comments in the Lean file using file_patch. The Prover branch will formalize each step. ",
+                        "Focus on the KEY MATHEMATICAL INSIGHT that makes the proof work.",
+                    ).to_string()
                 }
                 AgentRole::Retriever => {
                     "Focus on retrieving exact declaration names, likely lemmas, and imports."
@@ -478,9 +502,11 @@ pub async fn build_branch_turn_messages(
                 }
                 AgentRole::Prover => {
                     concat!(
-                        "Focus on producing a compilable Lean candidate for the active target. ",
-                        "You MUST use tools: file_read to see existing code, file_patch to modify it or file_write for new files, ",
-                        "then lean_verify to check. Iterate until lean_verify passes without sorry.",
+                        "Fill the sorry in the existing code. Do NOT change the theorem statement. ",
+                        "Strategy: decompose the sorry into `have` steps with sub-sorrys, verify the skeleton compiles, ",
+                        "then fill sub-sorrys one at a time. Use lean_search_tactic (exact?, apply?) on stuck goals. ",
+                        "Use corpus_search to find relevant Mathlib lemmas. Use shell_run with sage for computation. ",
+                        "You MUST use tools: file_read, file_patch, lean_verify. Iterate until sorry count decreases.",
                     ).to_string()
                 }
                 AgentRole::Repairer => {
