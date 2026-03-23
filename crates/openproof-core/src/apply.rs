@@ -1,5 +1,26 @@
 use crate::state::{AppEvent, AppState, PendingWrite};
 
+/// Replace the `sorry` on the given 1-indexed line with a tactic string.
+fn replace_sorry_at_line(content: &str, target_line: usize, tactic: &str) -> String {
+    let mut result = String::new();
+    let mut replaced = false;
+    for (i, line) in content.lines().enumerate() {
+        if i + 1 == target_line && !replaced {
+            if let Some(pos) = line.find("sorry") {
+                result.push_str(&line[..pos]);
+                result.push_str(tactic);
+                result.push_str(&line[pos + "sorry".len()..]);
+                result.push('\n');
+                replaced = true;
+                continue;
+            }
+        }
+        result.push_str(line);
+        result.push('\n');
+    }
+    result
+}
+
 impl AppState {
     pub fn apply(&mut self, event: AppEvent) -> Option<PendingWrite> {
         match event {
@@ -210,19 +231,40 @@ impl AppState {
                 solved,
                 tactics,
             } => {
-                let summary = if solved {
-                    format!(
-                        "Tactic search solved line {sorry_line} with: {}",
-                        tactics.join("; ")
-                    )
-                } else {
-                    format!(
+                if solved && !tactics.is_empty() {
+                    // Patch the sorry at sorry_line with the solving tactic sequence.
+                    let tactic_text = tactics.join("\n  ");
+                    self.status = format!(
+                        "Tactic search solved line {sorry_line}: {tactic_text}"
+                    );
+
+                    // Find the node and patch its content
+                    if let Some(session) = self.current_session_mut() {
+                        if let Some(node) = session.proof.nodes.iter_mut().find(|n| n.id == node_id) {
+                            let patched = replace_sorry_at_line(
+                                &node.content,
+                                sorry_line,
+                                &tactic_text,
+                            );
+                            if patched != node.content {
+                                node.content = patched;
+                                node.updated_at = chrono::Utc::now().to_rfc3339();
+                                node.status = openproof_protocol::ProofNodeStatus::Proving;
+                            }
+                        }
+                        // Mark that we need verification
+                        session.proof.phase = "verifying".to_string();
+                    }
+                    // Return a PendingWrite so the session is persisted
+                    if let Some(session) = self.current_session().cloned() {
+                        return Some(PendingWrite { session });
+                    }
+                } else if !tactics.is_empty() {
+                    self.status = format!(
                         "Tactic search partial at line {sorry_line}: {}",
                         tactics.join("; ")
-                    )
-                };
-                self.status = summary;
-                let _ = (node_id, sorry_line); // TODO: patch the file when solved
+                    );
+                }
             }
             AppEvent::TacticSearchProgress {
                 node_id: _,

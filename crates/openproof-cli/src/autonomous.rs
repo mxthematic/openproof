@@ -16,9 +16,13 @@ use crate::turn_handling::{
 };
 use anyhow::Result;
 use openproof_core::{AppEvent, AppState, AutonomousRunPatch};
+use openproof_lean::lsp_mcp::LeanLspMcp;
 use openproof_model::{run_codex_turn, CodexTurnRequest, TurnMessage};
-use openproof_protocol::{AgentRole, AgentStatus, BranchQueueState};
+use openproof_protocol::{AgentRole, AgentStatus, BranchQueueState, SearchStrategy};
+use openproof_search::config::TacticSearchConfig;
+use openproof_search::search::best_first_search;
 use openproof_store::AppStore;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -503,6 +507,21 @@ pub fn run_autonomous_step(
             }
         }
 
+        // Spawn tactic search in parallel with the agentic repair (if strategy allows).
+        let strategy = latest_session.proof.search_strategy;
+        if matches!(strategy, SearchStrategy::Hybrid | SearchStrategy::TacticSearch) {
+            spawn_tactic_search_for_sorrys(
+                tx.clone(),
+                &latest_session,
+                &store,
+            );
+            if matches!(strategy, SearchStrategy::TacticSearch) {
+                // Pure tactic search mode: skip the agentic branch entirely.
+                actions.push("Started tactic search (pure mode, no agentic branch).".to_string());
+                return Ok(actions.join("\n"));
+            }
+        }
+
         let (branch_id, session_snapshot) = ensure_hidden_agent_branch(
             tx.clone(),
             store.clone(),
@@ -936,5 +955,127 @@ pub async fn drain_until_settled(
                 }
             }
         }
+    }
+}
+
+/// Spawn best-first tactic search tasks for each sorry position in the active
+/// node's content. Each sorry gets its own search task, running in parallel
+/// with any agentic branches. Results come back as `TacticSearchComplete` events.
+fn spawn_tactic_search_for_sorrys(
+    tx: mpsc::UnboundedSender<AppEvent>,
+    session: &openproof_protocol::SessionSnapshot,
+    store: &AppStore,
+) {
+    let content = session.proof.nodes.first()
+        .map(|n| n.content.as_str())
+        .unwrap_or("");
+    if content.trim().is_empty() {
+        return;
+    }
+
+    let sorry_positions = openproof_lean::find_sorry_positions(content);
+    if sorry_positions.is_empty() {
+        return;
+    }
+
+    let node_id = session.proof.active_node_id.clone().unwrap_or_default();
+    let project_dir = crate::helpers::resolve_lean_project_dir();
+    let workspace_dir = store.workspace_dir(&session.id);
+
+    // Write the current content to a temp file for the LSP to read
+    let scratch_path = workspace_dir.join("Scratch.lean");
+    if let Some(rendered) = session.proof.last_rendered_scratch.as_deref() {
+        let _ = std::fs::write(&scratch_path, rendered);
+    } else if !content.trim().is_empty() {
+        let rendered = openproof_lean::render_node_scratch(
+            session,
+            session.proof.nodes.first().unwrap(),
+        );
+        let _ = std::fs::write(&scratch_path, &rendered);
+    }
+
+    // Spawn MCP client for the search tasks
+    let lsp_mcp = match LeanLspMcp::spawn(&project_dir) {
+        Ok(client) => Arc::new(Mutex::new(client)),
+        Err(e) => {
+            eprintln!("[tactic-search] Cannot spawn lean-lsp-mcp: {e}");
+            return;
+        }
+    };
+
+    let config = TacticSearchConfig::default();
+
+    for (line, col) in sorry_positions {
+        let tx = tx.clone();
+        let node_id = node_id.clone();
+        let lsp = lsp_mcp.clone();
+        let scratch = scratch_path.clone();
+        let config = config.clone();
+
+        tokio::task::spawn_blocking(move || {
+            eprintln!("[tactic-search] Searching at line {line}, col {col}");
+
+            // Simple propose function: returns common automation tactics.
+            // In a full implementation this would call the LLM.
+            let propose_fn: openproof_search::search::ProposeFn = Box::new(
+                move |_goal: &str, _context: &str, k: usize| {
+                    // Standard Lean automation tactics that often close goals
+                    let mut tactics = vec![
+                        "simp".to_string(),
+                        "omega".to_string(),
+                        "ring".to_string(),
+                        "norm_num".to_string(),
+                        "linarith".to_string(),
+                        "aesop".to_string(),
+                        "decide".to_string(),
+                        "trivial".to_string(),
+                        "exact?".to_string(),
+                        "apply?".to_string(),
+                        "simp_all".to_string(),
+                        "tauto".to_string(),
+                        "contradiction".to_string(),
+                        "norm_cast".to_string(),
+                        "positivity".to_string(),
+                        "gcongr".to_string(),
+                    ];
+                    tactics.truncate(k);
+                    Ok(tactics)
+                },
+            );
+
+            match best_first_search(
+                &lsp, &propose_fn, &scratch, line,
+                "", // retrieval context
+                &config,
+            ) {
+                Ok(result) => {
+                    let (solved, tactics) = match &result {
+                        openproof_search::config::SearchResult::Solved { tactics, .. } => {
+                            (true, tactics.clone())
+                        }
+                        openproof_search::config::SearchResult::Partial { tactics, .. } => {
+                            (false, tactics.clone())
+                        }
+                        _ => (false, vec![]),
+                    };
+                    if !tactics.is_empty() {
+                        eprintln!(
+                            "[tactic-search] Line {line}: {} (tactics: {})",
+                            if solved { "SOLVED" } else { "partial" },
+                            tactics.join("; ")
+                        );
+                    }
+                    let _ = tx.send(AppEvent::TacticSearchComplete {
+                        node_id,
+                        sorry_line: line,
+                        solved,
+                        tactics,
+                    });
+                }
+                Err(e) => {
+                    eprintln!("[tactic-search] Line {line} error: {e}");
+                }
+            }
+        });
     }
 }
