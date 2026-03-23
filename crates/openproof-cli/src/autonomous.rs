@@ -982,8 +982,9 @@ fn spawn_tactic_search_for_sorrys(
     let project_dir = crate::helpers::resolve_lean_project_dir();
     let workspace_dir = store.workspace_dir(&session.id);
 
-    // Write the current content to a temp file for the LSP to read
-    let scratch_path = workspace_dir.join("Scratch.lean");
+    // Write the current content to the Lean project dir for the LSP to read.
+    // The MCP requires files to be inside a Lean project (with lean-toolchain).
+    let scratch_path = project_dir.join("Scratch.lean");
     if let Some(rendered) = session.proof.last_rendered_scratch.as_deref() {
         let _ = std::fs::write(&scratch_path, rendered);
     } else if !content.trim().is_empty() {
