@@ -462,12 +462,18 @@ pub async fn build_branch_turn_messages(
                         .to_string()
                 }
                 AgentRole::Prover => {
-                    "Focus on producing a compilable Lean candidate for the active target."
-                        .to_string()
+                    concat!(
+                        "Focus on producing a compilable Lean candidate for the active target. ",
+                        "You MUST use tools: file_read to see existing code, file_patch to modify it or file_write for new files, ",
+                        "then lean_verify to check. Iterate until lean_verify passes without sorry.",
+                    ).to_string()
                 }
                 AgentRole::Repairer => {
-                    "Focus on repairing the current Lean candidate using the latest diagnostics."
-                        .to_string()
+                    concat!(
+                        "Focus on repairing the current Lean candidate using the latest diagnostics. ",
+                        "You MUST use tools: file_read to see the code, then file_patch to fix it, then lean_verify to check. ",
+                        "Do NOT output patches as text. Use the file_patch tool.",
+                    ).to_string()
                 }
                 AgentRole::Critic => {
                     "Focus on finding gaps, hidden assumptions, and likely failure modes."

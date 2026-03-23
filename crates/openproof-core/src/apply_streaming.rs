@@ -100,10 +100,13 @@ impl AppState {
 
                 session.proof.nodes = parsed_nodes.iter().map(|pn| {
                     let mut node = pn.clone();
-                    // Preserve verification status from previous run
-                    if let Some(&prev_status) = old_statuses.get(&node.label) {
-                        if prev_status != ProofNodeStatus::Pending {
-                            node.status = prev_status;
+                    // Only preserve old verified status if verification succeeded.
+                    // When verification fails (sorry, type errors, etc.), reset everything.
+                    if result.ok {
+                        if let Some(&prev_status) = old_statuses.get(&node.label) {
+                            if prev_status != ProofNodeStatus::Pending {
+                                node.status = prev_status;
+                            }
                         }
                     }
                     node.updated_at = now.clone();
