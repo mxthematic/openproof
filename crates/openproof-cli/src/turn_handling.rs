@@ -11,7 +11,9 @@ use crate::helpers::{
 };
 use crate::system_prompt::{build_branch_turn_messages, build_turn_messages_with_retrieval};
 use openproof_core::{AppEvent, AppState, PendingWrite, SubmittedInput};
+use openproof_lean::lsp_mcp::LeanLspMcp;
 use openproof_lean::tools::{execute_tool, ToolContext, ToolOutput};
+use std::sync::{Arc, Mutex};
 use openproof_model::{run_codex_turn, 
     run_codex_turn_with_events, CodexTurnRequest, StreamEvent, TurnMessage,
 };
@@ -76,6 +78,16 @@ pub async fn run_agentic_loop(
     let _ = std::fs::create_dir_all(&workspace_dir);
     let mut turn_used_tools = false;
     let mut last_verify_ok = false;
+
+    // Spawn lean-lsp-mcp for structured goal access (tools: lean_goals, lean_screen_tactics).
+    // Falls back gracefully if unavailable.
+    let lsp_mcp: Option<Arc<Mutex<LeanLspMcp>>> = LeanLspMcp::spawn(&project_dir)
+        .map(|client| {
+            eprintln!("[lsp-mcp] Spawned lean-lsp-mcp for session {session_id}");
+            Arc::new(Mutex::new(client))
+        })
+        .map_err(|e| eprintln!("[lsp-mcp] Not available (tools will use fallback): {e}"))
+        .ok();
 
     for iteration in 0..MAX_TOOL_ITERATIONS {
         let _ = tx.send(AppEvent::ToolLoopIteration(iteration));
@@ -188,12 +200,13 @@ pub async fn run_agentic_loop(
                             let project_dir = project_dir.clone();
                             let workspace_dir = workspace_dir.clone();
                             let imports = imports.clone();
+                            let lsp_handle = lsp_mcp.clone();
                             move || {
                                 let ctx = ToolContext {
                                     project_dir: &project_dir,
                                     workspace_dir: &workspace_dir,
                                     imports: &imports,
-                                    lsp_mcp: None,
+                                    lsp_mcp: lsp_handle,
                                 };
                                 execute_tool(&name, &arguments, &ctx)
                             }
@@ -302,6 +315,11 @@ pub fn start_agent_branch_turn(
         let mut turn_used_tools = false;
         let mut last_verify_ok = false;
 
+        // Spawn lean-lsp-mcp for this branch turn (shared with main loop via Arc).
+        let branch_lsp_mcp: Option<Arc<Mutex<LeanLspMcp>>> = LeanLspMcp::spawn(&project_dir)
+            .map(|c| Arc::new(Mutex::new(c)))
+            .ok();
+
         for _iteration in 0..MAX_TOOL_ITERATIONS {
             let result = run_codex_turn_with_events(
                 CodexTurnRequest {
@@ -361,12 +379,13 @@ pub fn start_agent_branch_turn(
                                 let project_dir = project_dir.clone();
                                 let workspace_dir = workspace_dir.clone();
                                 let imports = imports.clone();
+                                let lsp_handle = branch_lsp_mcp.clone();
                                 move || {
                                     let ctx = ToolContext {
                                         project_dir: &project_dir,
                                         workspace_dir: &workspace_dir,
                                         imports: &imports,
-                                        lsp_mcp: None,
+                                        lsp_mcp: lsp_handle,
                                     };
                                     execute_tool(&name, &arguments, &ctx)
                                 }

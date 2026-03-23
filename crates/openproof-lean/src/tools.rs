@@ -291,7 +291,7 @@ fn tool_lean_screen_tactics(args: &Value, ctx: &ToolContext) -> Result<ToolOutpu
 }
 
 /// Find (line, column) positions of all `sorry` tokens in content.
-fn find_sorry_positions(content: &str) -> Vec<(usize, usize)> {
+pub fn find_sorry_positions(content: &str) -> Vec<(usize, usize)> {
     let mut positions = Vec::new();
     for (i, line) in content.lines().enumerate() {
         let mut start = 0;

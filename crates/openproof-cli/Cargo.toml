@@ -20,6 +20,7 @@ openproof-store = { path = "../openproof-store" }
 openproof-tui = { path = "../openproof-tui" }
 openproof-model = { path = "../openproof-model" }
 openproof-lean = { path = "../openproof-lean" }
+openproof-search = { path = "../openproof-search" }
 openproof-protocol = { path = "../openproof-protocol" }
 openproof-cloud = { path = "../openproof-cloud" }
 openproof-corpus = { path = "../openproof-corpus" }
