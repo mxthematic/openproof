@@ -133,10 +133,17 @@ impl AppState {
                     .iter_mut()
                     .find(|node| node.id == node_id)
                 {
-                    // Never mark verified if the content still has sorry
-                    let truly_ok = result.ok
-                        && !node.content.contains("sorry")
-                        && !result.rendered_scratch.contains("sorry");
+                    // Never mark verified if the content has sorry or is vacuous
+                    let has_sorry = node.content.contains("sorry")
+                        || result.rendered_scratch.contains("sorry");
+                    // Reject vacuous proofs: conclusion is True, or uses axiom/constant
+                    let is_vacuous = result.rendered_scratch.contains(": True :=")
+                        || result.rendered_scratch.contains(": True by")
+                        || result.rendered_scratch.lines().any(|l| {
+                            let t = l.trim();
+                            t.starts_with("axiom ") || t.starts_with("constant ")
+                        });
+                    let truly_ok = result.ok && !has_sorry && !is_vacuous;
                     node.status = if truly_ok {
                         ProofNodeStatus::Verified
                     } else {

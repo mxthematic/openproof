@@ -530,8 +530,14 @@ impl AppState {
                     .iter_mut()
                     .find(|node| node.id == node_id)
                 {
-                    // Never mark as verified if content contains sorry
-                    let actually_verified = verified && !content.contains("sorry");
+                    // Never mark as verified if content has sorry or is vacuous
+                    let is_vacuous = content.contains(": True :=")
+                        || content.contains(": True by")
+                        || content.lines().any(|l| {
+                            let t = l.trim();
+                            t.starts_with("axiom ") || t.starts_with("constant ")
+                        });
+                    let actually_verified = verified && !content.contains("sorry") && !is_vacuous;
                     node.content = content;
                     node.status = if actually_verified {
                         ProofNodeStatus::Verified
