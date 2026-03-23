@@ -112,6 +112,20 @@ pub enum AppEvent {
     SyncCompleted,
     PersistSucceeded(String),
     PersistFailed(String),
+    /// Tactic search completed for a sorry position.
+    TacticSearchComplete {
+        node_id: String,
+        sorry_line: usize,
+        solved: bool,
+        tactics: Vec<String>,
+    },
+    /// Progress update from tactic search.
+    TacticSearchProgress {
+        node_id: String,
+        sorry_line: usize,
+        expansions: usize,
+        best_remaining_goals: usize,
+    },
     Quit,
 }
 

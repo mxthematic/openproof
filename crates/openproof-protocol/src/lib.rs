@@ -279,6 +279,21 @@ pub struct ProofSessionState {
     pub workspace_files: Vec<WorkspaceFileEntry>,
     /// How many tool loop iterations were used in the last turn.
     pub tool_iteration_count: usize,
+    /// Strategy for proof search: agentic, tactic search, or hybrid.
+    pub search_strategy: SearchStrategy,
+}
+
+/// Strategy for autonomous proof search.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchStrategy {
+    /// Agents write and patch whole files (current behavior).
+    Agentic,
+    /// Pure tactic search at each sorry (no agentic loop).
+    TacticSearch,
+    /// Both run in parallel. First to solve a sorry wins.
+    #[default]
+    Hybrid,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

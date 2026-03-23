@@ -48,6 +48,7 @@ pub(crate) fn default_proof_state() -> ProofSessionState {
         attempt_number: 0,
         workspace_files: Vec::new(),
         tool_iteration_count: 0,
+        search_strategy: Default::default(),
     }
 }
 

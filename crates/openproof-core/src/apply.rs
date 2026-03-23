@@ -203,6 +203,38 @@ impl AppState {
                 self.pending_writes = self.pending_writes.saturating_sub(1);
                 self.status = format!("Background persistence failed: {error}");
             }
+            // --- Tactic search ---
+            AppEvent::TacticSearchComplete {
+                node_id,
+                sorry_line,
+                solved,
+                tactics,
+            } => {
+                let summary = if solved {
+                    format!(
+                        "Tactic search solved line {sorry_line} with: {}",
+                        tactics.join("; ")
+                    )
+                } else {
+                    format!(
+                        "Tactic search partial at line {sorry_line}: {}",
+                        tactics.join("; ")
+                    )
+                };
+                self.status = summary;
+                let _ = (node_id, sorry_line); // TODO: patch the file when solved
+            }
+            AppEvent::TacticSearchProgress {
+                node_id: _,
+                sorry_line,
+                expansions,
+                best_remaining_goals,
+            } => {
+                self.status = format!(
+                    "Tactic search line {sorry_line}: {expansions} expansions, {best_remaining_goals} goals remaining"
+                );
+            }
+
             AppEvent::Quit => {
                 self.should_quit = true;
             }

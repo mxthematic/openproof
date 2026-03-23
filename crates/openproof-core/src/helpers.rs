@@ -128,6 +128,7 @@ pub fn default_session_with_workspace(
             attempt_number: 0,
             workspace_files: Vec::new(),
             tool_iteration_count: 0,
+            search_strategy: Default::default(),
         },
     }
 }
