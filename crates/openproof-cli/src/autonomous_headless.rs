@@ -480,9 +480,16 @@ pub async fn run_autonomous(
             eprintln!("\n[run] *** {} node(s) VERIFIED ***", verified.len());
             for node in &verified {
                 eprintln!("[run] {}: {}", node.label, node.statement);
-                eprintln!("{}", node.content);
             }
-            break;
+            // In full_autonomous mode, don't stop on first verification.
+            // Keep pushing -- verified sub-lemmas are progress but not the goal.
+            let all_verified = session.proof.nodes.iter()
+                .all(|n| n.status == openproof_protocol::ProofNodeStatus::Verified);
+            if all_verified {
+                eprintln!("[run] All nodes verified -- stopping.");
+                break;
+            }
+            eprintln!("[run] Continuing -- not all nodes verified yet.");
         }
     }
 
