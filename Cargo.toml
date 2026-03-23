@@ -5,6 +5,7 @@ members = [
   "crates/openproof-store",
   "crates/openproof-model",
   "crates/openproof-lean",
+  "crates/openproof-search",
   "crates/openproof-dashboard",
   "crates/openproof-tui",
   "crates/openproof-cli",
