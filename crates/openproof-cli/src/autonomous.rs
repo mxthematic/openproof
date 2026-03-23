@@ -169,11 +169,18 @@ pub fn run_autonomous_step(
                     | openproof_protocol::ProofNodeStatus::Proving
             )
     });
-    if unverified_with_content.is_some() {
+    if let Some(unode) = unverified_with_content {
         eprintln!(
-            "[auto] Found unverified node with content, spawning verification..."
+            "[auto] Found unverified node '{}' with content, spawning verification...",
+            unode.label
         );
-        let verification_session = latest_session.clone();
+        // Ensure active_node_id points to this node so verify_active_node finds it
+        let unode_id = unode.id.clone();
+        if let Some(s) = state.current_session_mut() {
+            s.proof.active_node_id = Some(unode_id);
+        }
+        let verification_session = state.current_session().cloned()
+            .ok_or_else(|| "No active session.".to_string())?;
         if let Some(write) = state.apply(AppEvent::LeanVerifyStarted) {
             persist_write(tx.clone(), store.clone(), write);
         }

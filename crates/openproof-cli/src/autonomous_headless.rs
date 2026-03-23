@@ -241,6 +241,13 @@ pub async fn run_autonomous(
         if let Some(scratch) = store.read_scratch(&session_id) {
             if !scratch.trim().is_empty() {
                 if let Some(s) = state.current_session_mut() {
+                    // Ensure active_node_id is set -- fall back to first node
+                    if s.proof.active_node_id.is_none() {
+                        if let Some(first) = s.proof.nodes.first() {
+                            eprintln!("[run] Setting active_node_id to first node: {}", first.label);
+                            s.proof.active_node_id = Some(first.id.clone());
+                        }
+                    }
                     if let Some(node_id) = s.proof.active_node_id.clone() {
                         if let Some(node) = s.proof.nodes.iter_mut().find(|n| n.id == node_id) {
                             if node.content.trim().is_empty() {
