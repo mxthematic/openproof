@@ -109,12 +109,9 @@ fn tools_and_workflow_section() -> &'static str {
 
         "### Research tools\n",
         "- `corpus_search(query)`: Search 190K+ verified Mathlib declarations + user proofs. Use for finding lemmas.\n",
-        "- Web search (built-in): Search for papers, ArXiv preprints, MathOverflow. ",
-        "For open problems, search for the key papers and proof techniques BEFORE writing code.\n\n",
+        "- Web search (built-in): Search for papers, ArXiv preprints, MathOverflow when stuck on a proof strategy.\n\n",
 
         "### Workflow\n",
-        "For open/research problems:\n",
-        "0. Web search for the key papers and known techniques.\n",
         "1. Create initial files with `file_write` -- skeleton with `sorry` for hard parts.\n",
         "2. `lean_verify` to check the skeleton compiles.\n",
         "3. `file_read` the file, then `file_patch` to fill in sorrys one at a time.\n",
