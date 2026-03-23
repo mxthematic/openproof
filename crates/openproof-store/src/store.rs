@@ -180,7 +180,17 @@ impl AppStore {
             let path = entry.path();
             // Skip the history directory.
             if path.is_dir() {
-                if path.file_name().map(|n| n == "history").unwrap_or(false) {
+                let name = path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                // Skip build artifacts, history, hidden dirs, and package dirs
+                if name == "history"
+                    || name == ".lake"
+                    || name == ".git"
+                    || name.starts_with('.')
+                    || name == "build"
+                    || name == "lake-packages"
+                {
                     continue;
                 }
                 Self::walk_workspace(base, &path, out)?;
