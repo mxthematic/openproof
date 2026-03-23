@@ -204,9 +204,14 @@ pub async fn run_agentic_loop(
                         })
                     };
 
-                    // Track lean_verify success for workspace sync
+                    // Track lean_verify success for workspace sync.
+                    // Only mark verified if the LAST verify passed AND no verify failed with sorry.
                     if call.name == "lean_verify" {
-                        last_verify_ok = output.success;
+                        if !output.success {
+                            last_verify_ok = false;
+                        } else if !output.content.contains("sorry") {
+                            last_verify_ok = true;
+                        }
                     }
 
                     // Emit tool result event for transcript.
@@ -370,9 +375,13 @@ pub fn start_agent_branch_turn(
                                 content: "Tool execution panicked".to_string(),
                             })
                         };
-                        // Track lean_verify success for workspace sync
+                        // Track lean_verify success -- only true if no verify failed with sorry
                         if call.name == "lean_verify" {
-                            last_verify_ok = output.success;
+                            if !output.success {
+                                last_verify_ok = false;
+                            } else if !output.content.contains("sorry") {
+                                last_verify_ok = true;
+                            }
                         }
                         all_messages.push(TurnMessage::tool_result(
                             &call.call_id,
