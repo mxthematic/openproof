@@ -106,6 +106,9 @@ impl AppState {
             AppEvent::ToolLoopIteration(iteration) => {
                 self.tool_loop_iteration = iteration;
             }
+            AppEvent::WorkspaceContentSync { content, verified } => {
+                return self.apply_workspace_content_sync(content, verified);
+            }
 
             // --- UI / navigation ---
             AppEvent::FocusNext => {

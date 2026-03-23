@@ -127,6 +127,13 @@ pub fn run_autonomous_step(
         actions.push(summary);
     }
 
+    // Always advance past retrieval -- it's informational, not blocking
+    if let Some(s) = state.current_session_mut() {
+        if s.proof.phase == "retrieving" || s.proof.phase == "idle" {
+            s.proof.phase = "proving".to_string();
+        }
+    }
+
     let latest_session = state
         .current_session()
         .cloned()
@@ -150,6 +157,51 @@ pub fn run_autonomous_step(
         .current_session()
         .cloned()
         .ok_or_else(|| "No active session.".to_string())?;
+
+    // If any node has content but hasn't been verified, verify it now
+    // before doing anything else. This closes the loop after tool turns
+    // write code via file_write + lean_verify succeeds in the tool loop.
+    let unverified_with_content = latest_session.proof.nodes.iter().find(|n| {
+        !n.content.trim().is_empty()
+            && matches!(
+                n.status,
+                openproof_protocol::ProofNodeStatus::Pending
+                    | openproof_protocol::ProofNodeStatus::Proving
+            )
+    });
+    if unverified_with_content.is_some() {
+        eprintln!(
+            "[auto] Found unverified node with content, spawning verification..."
+        );
+        let verification_session = latest_session.clone();
+        if let Some(write) = state.apply(AppEvent::LeanVerifyStarted) {
+            persist_write(tx.clone(), store.clone(), write);
+        }
+        let project_dir = crate::helpers::resolve_lean_project_dir();
+        let tx_verify = tx.clone();
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                openproof_lean::verify_active_node(&project_dir, &verification_session)
+            })
+            .await
+            .ok()
+            .and_then(|r| r.ok());
+            match result {
+                Some(summary) => {
+                    let _ = tx_verify.send(AppEvent::LeanVerifyFinished(summary));
+                }
+                None => {
+                    let _ = tx_verify.send(AppEvent::AppendNotice {
+                        title: "Verify Error".to_string(),
+                        content: "Lean verification crashed.".to_string(),
+                    });
+                }
+            }
+        });
+        actions.push("Started verification of unverified node.".to_string());
+        return Ok(actions.join("\n"));
+    }
+
     let repair_basis = current_foreground_branch(Some(&latest_session))
         .filter(|branch| {
             branch

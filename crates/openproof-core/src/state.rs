@@ -92,6 +92,9 @@ pub enum AppEvent {
         output: String,
     },
     ToolLoopIteration(usize),
+    /// Sync workspace file content into the active proof node.
+    /// Emitted after a tool-using turn so node.content reflects what tools wrote.
+    WorkspaceContentSync { content: String, verified: bool },
     FocusNext,
     ToggleProofPane,
     SelectPrevQuestionOption,

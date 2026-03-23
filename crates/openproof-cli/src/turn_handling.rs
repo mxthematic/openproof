@@ -74,6 +74,8 @@ pub async fn run_agentic_loop(
     let workspace_dir = store.workspace_dir(session_id);
     // Ensure workspace directory exists.
     let _ = std::fs::create_dir_all(&workspace_dir);
+    let mut turn_used_tools = false;
+    let mut last_verify_ok = false;
 
     for iteration in 0..MAX_TOOL_ITERATIONS {
         let _ = tx.send(AppEvent::ToolLoopIteration(iteration));
@@ -112,6 +114,8 @@ pub async fn run_agentic_loop(
                     // Text was streamed via StreamDelta events.
                     break;
                 }
+
+                turn_used_tools = true;
 
                 // Flush any accumulated streaming text before tool call entries.
                 if !result.text.trim().is_empty() {
@@ -200,6 +204,11 @@ pub async fn run_agentic_loop(
                         })
                     };
 
+                    // Track lean_verify success for workspace sync
+                    if call.name == "lean_verify" {
+                        last_verify_ok = output.success;
+                    }
+
                     // Emit tool result event for transcript.
                     eprintln!("[tool] {} -> {} ({})",
                         call.name,
@@ -230,6 +239,18 @@ pub async fn run_agentic_loop(
         }
     }
 
+    // After tool loop: sync workspace content to node.content
+    if turn_used_tools {
+        if let Some(scratch) = store.read_scratch(session_id) {
+            if !scratch.trim().is_empty() {
+                let _ = tx.send(AppEvent::WorkspaceContentSync {
+                    content: scratch,
+                    verified: last_verify_ok,
+                });
+            }
+        }
+    }
+
     let _ = tx.send(AppEvent::TurnFinished);
 }
 
@@ -254,6 +275,7 @@ pub fn start_agent_branch_turn(
         let mut all_messages = messages;
         let mut accumulated_text = String::new();
         let mut turn_used_tools = false;
+        let mut last_verify_ok = false;
 
         for _iteration in 0..MAX_TOOL_ITERATIONS {
             let result = run_codex_turn_with_events(
@@ -329,6 +351,10 @@ pub fn start_agent_branch_turn(
                                 content: "Tool execution panicked".to_string(),
                             })
                         };
+                        // Track lean_verify success for workspace sync
+                        if call.name == "lean_verify" {
+                            last_verify_ok = output.success;
+                        }
                         all_messages.push(TurnMessage::tool_result(
                             &call.call_id,
                             &output.content,
@@ -344,6 +370,18 @@ pub fn start_agent_branch_turn(
                         output: message,
                     });
                     return;
+                }
+            }
+        }
+
+        // After tool loop: sync workspace content to node.content
+        if turn_used_tools {
+            if let Some(scratch) = store.read_scratch(&session_snapshot.id) {
+                if !scratch.trim().is_empty() {
+                    let _ = tx.send(AppEvent::WorkspaceContentSync {
+                        content: scratch,
+                        verified: last_verify_ok,
+                    });
                 }
             }
         }

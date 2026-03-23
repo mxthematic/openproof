@@ -100,18 +100,20 @@ fn tools_and_workflow_section() -> &'static str {
         "Results are machine-verified -- use them directly.\n\n",
 
         "### Standard workflow\n",
-        "1. Search the corpus for relevant existing results with `corpus_search`.\n",
-        "2. Write Lean code with `file_write('Scratch.lean', ...)`.\n",
-        "3. Verify with `lean_verify('Scratch.lean')`. Read the errors carefully.\n",
-        "4. Fix errors with `file_patch` (surgical) or `file_write` (full rewrite if needed).\n",
-        "5. If unsure of a lemma name, use `lean_check`. If stuck on a goal, use `lean_search_tactic`.\n",
-        "6. Repeat 3-5 until verification passes. Do ALL of this in a single turn.\n\n",
+        "1. Write Lean code IMMEDIATELY with `file_write('Scratch.lean', ...)`. ",
+        "Start with a skeleton: state theorems/lemmas, use `sorry` for proofs you're unsure about.\n",
+        "2. Verify with `lean_verify('Scratch.lean')`. Read the errors carefully.\n",
+        "3. Fix errors with `file_patch`. If you hit an unknown identifier, use `lean_check` to find the right name.\n",
+        "4. Use `corpus_search` when stuck on a specific goal -- to find relevant lemmas.\n",
+        "5. Use `lean_search_tactic` to close goals with exact?/apply?/rw?.\n",
+        "6. Repeat 2-5 until verification passes. Do ALL of this in a single turn.\n\n",
 
         "CRITICAL RULES:\n",
-        "- Always verify your code with lean_verify. Never claim a proof works without checking.\n",
-        "- Use file_patch for fixes, not file_write. Patches show exactly what changed.\n",
-        "- Use lean_check and corpus_search BEFORE guessing lemma names.\n",
-        "- You can iterate many times in one turn -- write, verify, fix, verify, fix, verify.",
+        "- Write code FIRST, research LATER. Your first tool call should be file_write, not corpus_search.\n",
+        "- Use sorry for parts you're unsure about. Verify the skeleton, then fill in sorrys one at a time.\n",
+        "- Use lean_check ONLY when you get an unknown identifier error, not to pre-check every name.\n",
+        "- Always verify with lean_verify. Never claim a proof works without checking.\n",
+        "- Use file_patch for fixes, not file_write. Patches show exactly what changed.",
     )
 }
 
@@ -458,5 +460,28 @@ pub async fn build_branch_turn_messages(
             agent_role_label(role),
             title
         )));
+
+    // Include current workspace Scratch.lean so branches see existing code
+    if let Some(scratch) = store.read_scratch(&session.id) {
+        if !scratch.trim().is_empty() {
+            messages.push(TurnMessage::chat("user", format!(
+                "Current workspace Scratch.lean ({} lines):\n```lean\n{}\n```\nBuild on this code. Do NOT rewrite from scratch.",
+                scratch.lines().count(), scratch
+            )));
+        }
+    }
+
+    // Include active node status so branches know verification state
+    if let Some(node) = session.proof.nodes.iter()
+        .find(|n| Some(n.id.as_str()) == session.proof.active_node_id.as_deref())
+    {
+        if !node.content.trim().is_empty() {
+            messages.push(TurnMessage::chat("user", format!(
+                "Active node '{}' status: {:?}",
+                node.label, node.status
+            )));
+        }
+    }
+
     messages
 }

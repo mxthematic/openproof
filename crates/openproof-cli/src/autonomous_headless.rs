@@ -182,6 +182,27 @@ pub async fn run_autonomous(
             let _ = state.apply(event);
         }
         let _ = state.apply(AppEvent::TurnFinished);
+
+        // Sync workspace content to active node after tool turn.
+        // The agentic loop emits WorkspaceContentSync via the channel, but
+        // we also do a direct sync here as a belt-and-suspenders fallback.
+        let session_id = state.current_session().map(|s| s.id.clone()).unwrap_or_default();
+        if let Some(scratch) = store.read_scratch(&session_id) {
+            if !scratch.trim().is_empty() {
+                if let Some(s) = state.current_session_mut() {
+                    if let Some(node_id) = s.proof.active_node_id.clone() {
+                        if let Some(node) = s.proof.nodes.iter_mut().find(|n| n.id == node_id) {
+                            if node.content.trim().is_empty() {
+                                eprintln!("[run] Syncing workspace Scratch.lean -> node.content ({} chars)", scratch.len());
+                                node.content = scratch;
+                                node.status = openproof_protocol::ProofNodeStatus::Proving;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if let Some(session) = state.current_session().cloned() {
             let s = store.clone();
             let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
@@ -419,6 +440,24 @@ pub async fn run_autonomous(
 
         // Drain events until all branches settle
         drain_until_settled(tx.clone(), store.clone(), &mut state, &mut rx).await;
+
+        // Sync workspace content after branch turns (branches may have written files)
+        {
+            let sid = state.current_session().map(|s| s.id.clone()).unwrap_or_default();
+            if let Some(scratch) = store.read_scratch(&sid) {
+                if !scratch.trim().is_empty() {
+                    if let Some(s) = state.current_session_mut() {
+                        if let Some(node_id) = s.proof.active_node_id.clone() {
+                            if let Some(node) = s.proof.nodes.iter_mut().find(|n| n.id == node_id) {
+                                if node.content.trim().is_empty() || node.content != scratch {
+                                    node.content = scratch;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         if let Some(session) = state.current_session().cloned() {
             let s = store.clone();

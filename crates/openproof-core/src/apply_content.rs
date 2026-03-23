@@ -506,4 +506,53 @@ impl AppState {
         }
         None
     }
+
+    /// Sync workspace file content into the active proof node.
+    /// Called after tool-using turns so node.content reflects what
+    /// file_write/file_patch tools actually wrote to the workspace.
+    pub(crate) fn apply_workspace_content_sync(
+        &mut self,
+        content: String,
+        verified: bool,
+    ) -> Option<PendingWrite> {
+        if content.trim().is_empty() {
+            return None;
+        }
+        if let Some(snapshot) = self.current_session_mut().map(|session| {
+            let now = Utc::now().to_rfc3339();
+            session.updated_at = now.clone();
+            session.proof.last_rendered_scratch = Some(content.clone());
+            let active_node_id = session.proof.active_node_id.clone();
+            if let Some(node_id) = active_node_id {
+                if let Some(node) = session
+                    .proof
+                    .nodes
+                    .iter_mut()
+                    .find(|node| node.id == node_id)
+                {
+                    node.content = content;
+                    node.status = if verified {
+                        ProofNodeStatus::Verified
+                    } else {
+                        ProofNodeStatus::Proving
+                    };
+                    node.updated_at = now.clone();
+                    if verified {
+                        session.proof.phase = "done".to_string();
+                        session.proof.status_line =
+                            format!("Lean verified {} via tool loop.", node.label);
+                    } else {
+                        session.proof.phase = "proving".to_string();
+                        session.proof.status_line =
+                            format!("Synced workspace code for {}.", node.label);
+                    }
+                }
+            }
+            session.clone()
+        }) {
+            self.pending_writes += 1;
+            return Some(PendingWrite { session: snapshot });
+        }
+        None
+    }
 }
