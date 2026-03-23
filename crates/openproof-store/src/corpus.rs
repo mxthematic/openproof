@@ -373,10 +373,10 @@ impl AppStore {
             // Queue failure for cloud sync so future sessions learn from it
             let failure_payload = serde_json::json!({
                 "attempts": [{
-                    "attemptHash": &attempt_hash,
-                    "targetLabel": node.label,
-                    "targetStatement": node.statement,
-                    "failureClass": &failure_class,
+                    "attempt_hash": &attempt_hash,
+                    "target_label": node.label,
+                    "target_statement": node.statement,
+                    "failure_class": &failure_class,
                     "snippet": snippet_short,
                     "diagnostic": &diagnostic_summary,
                 }]

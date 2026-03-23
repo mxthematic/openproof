@@ -385,7 +385,8 @@ pub async fn run_autonomous(
                             "[run] Corpus: verified={}, user_verified={}",
                             corpus.verified_entry_count, corpus.user_verified_count
                         );
-                        return Ok(());
+                        // Don't return early -- fall through to cloud sync below
+                        break;
                     } else {
                         eprintln!("[run] Candidate {} failed:", idx + 1);
                         for line in result.stderr.lines().take(3) {

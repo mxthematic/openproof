@@ -385,7 +385,7 @@ impl CloudCorpusClient {
         let response = self
             .client
             .post(format!("{base_url}/api/v1/uploads/failed-attempts"))
-            .json(&serde_json::json!({ "attempts": [attempt] }))
+            .json(&serde_json::json!([attempt]))
             .send()
             .await
             .context("failed attempt upload request failed")?;
