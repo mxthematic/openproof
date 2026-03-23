@@ -499,13 +499,26 @@ pub async fn build_branch_turn_messages(
             title
         )));
 
-    // Include current workspace Scratch.lean so branches see existing code
-    if let Some(scratch) = store.read_scratch(&session.id) {
-        if !scratch.trim().is_empty() {
-            messages.push(TurnMessage::chat("user", format!(
-                "Current workspace Scratch.lean ({} lines):\n```lean\n{}\n```\nBuild on this code. Do NOT rewrite from scratch.",
-                scratch.lines().count(), scratch
-            )));
+    // Include ALL workspace .lean files so branches see current codebase
+    if let Ok(files) = store.list_workspace_files(&session.id) {
+        let ws_dir = store.workspace_dir(&session.id);
+        let lean_files: Vec<_> = files.iter()
+            .filter(|(p, _)| p.ends_with(".lean") && !p.contains("history/"))
+            .collect();
+        if !lean_files.is_empty() {
+            for (path, _) in &lean_files {
+                if let Ok(content) = std::fs::read_to_string(ws_dir.join(path)) {
+                    if !content.trim().is_empty() && content.lines().count() <= 200 {
+                        messages.push(TurnMessage::chat("user", format!(
+                            "File: {path} ({} lines):\n```lean\n{content}\n```",
+                            content.lines().count()
+                        )));
+                    }
+                }
+            }
+            messages.push(TurnMessage::chat("user",
+                "Build on this code. Use file_patch to modify existing files. Do NOT rewrite from scratch.".to_string()
+            ));
         }
     }
 

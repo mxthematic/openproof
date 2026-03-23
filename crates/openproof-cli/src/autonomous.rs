@@ -490,6 +490,51 @@ pub fn run_autonomous_step(
         return Ok(actions.join("\n"));
     }
 
+    // Build rich context for Prover/Planner branches (same pattern as Repairer)
+    let branch_context = {
+        let mut ctx = String::new();
+        // Show workspace files
+        if let Ok(files) = store.list_workspace_files(&latest_session.id) {
+            let lean_files: Vec<_> = files.iter()
+                .filter(|(p, _)| p.ends_with(".lean") && !p.contains("history/"))
+                .collect();
+            if !lean_files.is_empty() {
+                ctx.push_str("Workspace files:\n");
+                for (path, size) in &lean_files {
+                    ctx.push_str(&format!("  {path} ({size} bytes)\n"));
+                }
+                ctx.push('\n');
+            }
+        }
+        // Show primary file content with line numbers
+        let ws_dir = store.workspace_dir(&latest_session.id);
+        for name in &["Main.lean", "Scratch.lean", "Helpers.lean", "Defs.lean"] {
+            let path = ws_dir.join(name);
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if !content.trim().is_empty() && content.lines().count() <= 200 {
+                    ctx.push_str(&format!("{name}:\n```lean\n"));
+                    for (i, line) in content.lines().enumerate() {
+                        ctx.push_str(&format!("{:4}: {}\n", i + 1, line));
+                    }
+                    ctx.push_str("```\n\n");
+                }
+            }
+        }
+        // Strategy summary if available
+        if let Some(summary) = latest_session.proof.strategy_summary.as_ref().filter(|s| !s.trim().is_empty()) {
+            ctx.push_str(&format!("Strategy: {summary}\n\n"));
+        }
+        // Explicit tool instructions
+        ctx.push_str(
+            "INSTRUCTIONS: Use tools to work on this code.\n\
+             1. file_read to see current files with line numbers\n\
+             2. file_patch to modify code (fill sorrys, fix errors)\n\
+             3. lean_verify to check your changes compile\n\
+             Do NOT output code as text. Use file_patch tool.\n\n"
+        );
+        ctx
+    };
+
     if latest_session
         .proof
         .strategy_summary
@@ -497,7 +542,7 @@ pub fn run_autonomous_step(
         .map(|item| item.trim().is_empty())
         .unwrap_or(true)
     {
-        let description = format!("Refine a proof plan for {target}.");
+        let description = format!("{branch_context}Refine a proof plan for {target}.");
         let title = format!("{} planner", latest_session.title);
         let (branch_id, session_snapshot) = ensure_hidden_agent_branch(
             tx.clone(),
@@ -525,7 +570,7 @@ pub fn run_autonomous_step(
         .ok_or_else(|| "No active session.".to_string())?;
     let has_foreground = current_foreground_branch(Some(&latest_session)).is_some();
     if has_foreground {
-        let description = format!("Produce an alternate Lean proof candidate for {target}.");
+        let description = format!("{branch_context}Produce an alternate Lean proof candidate for {target}.");
         let title = format!("{} search prover", latest_session.title);
         let (branch_id, session_snapshot) = ensure_hidden_agent_branch(
             tx.clone(),
@@ -547,7 +592,7 @@ pub fn run_autonomous_step(
         actions.push(format!("Started hidden prover branch {branch_id}."));
     } else {
         let title = format!("{} prover", latest_session.title);
-        let description = format!("Produce a Lean proof candidate for {target}.");
+        let description = format!("{branch_context}Produce a Lean proof candidate for {target}.");
         let (write, branch_id, task_id) =
             state.spawn_agent_branch(AgentRole::Prover, &title, &description, false)?;
         let session_snapshot = write.session.clone();
