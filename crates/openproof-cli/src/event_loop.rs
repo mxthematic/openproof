@@ -188,6 +188,7 @@ pub async fn run_app(
                 if let Some(session) = state.current_session().cloned() {
                     // Create a node if none exist (headless fallback equivalent)
                     if session.proof.nodes.is_empty() {
+                        eprintln!("[tui-sync] Creating node (nodes empty, finished={is_turn_finished}, assistant={is_assistant_append})");
                         let label = if session.title != "OpenProof Rust Session" && !session.title.trim().is_empty() {
                             session.title.clone()
                         } else {
@@ -226,6 +227,7 @@ pub async fn run_app(
                         }
                     }
                     if !all_lean.trim().is_empty() {
+                        eprintln!("[tui-sync] Syncing {} chars from workspace", all_lean.len());
                         if let Some(s) = state.current_session_mut() {
                             // Ensure active_node_id is set
                             if s.proof.active_node_id.is_none() {
