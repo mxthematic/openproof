@@ -391,8 +391,12 @@ pub async fn run_autonomous(
                         let sr = store.clone();
                         let ss = state.current_session().cloned().unwrap();
                         let rr = result.clone();
+                        let sr2 = store.clone();
+                        let sid = ss.id.clone();
                         let _ = tokio::task::spawn_blocking(move || {
-                            sr.record_verification_result(&ss, &rr)
+                            let res = sr.record_verification_result(&ss, &rr);
+                            crate::helpers::populate_knowledge_graph(&sr2, &sid);
+                            res
                         })
                         .await;
 

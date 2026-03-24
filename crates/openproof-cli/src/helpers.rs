@@ -399,6 +399,36 @@ pub fn embed_verified_item(
     });
 }
 
+/// Populate knowledge graph edges and tags from workspace .lean files.
+/// Called after successful verification to build the corpus graph.
+pub fn populate_knowledge_graph(store: &AppStore, session_id: &str) {
+    let ws_dir = store.workspace_dir(session_id);
+    let mut all_lean = String::new();
+    if let Ok(files) = store.list_workspace_files(session_id) {
+        for (path, _) in &files {
+            if path.ends_with(".lean") && !path.contains("history/") {
+                if let Ok(content) = std::fs::read_to_string(ws_dir.join(path)) {
+                    if !all_lean.is_empty() { all_lean.push_str("\n\n"); }
+                    all_lean.push_str(&content);
+                }
+            }
+        }
+    }
+    if all_lean.trim().is_empty() {
+        return;
+    }
+    let parsed = openproof_lean::parse_lean_declarations(&all_lean);
+    let all_names: Vec<&str> = parsed.iter().map(|d| d.name.as_str()).collect();
+    for decl in &parsed {
+        let from_key = format!("user-verified/{}/{}", session_id, decl.name);
+        for dep in openproof_lean::parse::extract_dependencies(&decl.body, &all_names, &decl.name) {
+            let to_key = format!("user-verified/{}/{}", session_id, dep);
+            let _ = store.add_corpus_edge(&from_key, &to_key, "uses", 1.0);
+        }
+        let _ = store.auto_tag_from_module(&from_key, &decl.name);
+    }
+}
+
 /// Generate a LaTeX paper body from the current proof state.
 /// Called on every session save so the paper is always up to date.
 pub fn generate_paper_tex(
