@@ -282,8 +282,9 @@ pub async fn run_app(
                                 }
                             }
                             s.proof.last_rendered_scratch = Some(all_lean.clone());
-                            // Extract title from workspace file comments if still default
+                            // Extract title from workspace file comments or LaTeX \title{}
                             if s.title == "OpenProof Rust Session" || s.title.trim().is_empty() {
+                                // Try TITLE: marker in Lean comments
                                 for line in all_lean.lines() {
                                     let trimmed = line.trim();
                                     if let Some(title) = trimmed.strip_prefix("TITLE:").or_else(|| trimmed.strip_prefix("TITLE :")) {
@@ -294,8 +295,19 @@ pub async fn run_app(
                                         }
                                     }
                                 }
+                                // Also try extracting from LaTeX \title{...} in paper_tex
+                                if s.title == "OpenProof Rust Session" || s.title.trim().is_empty() {
+                                    if let Some(start) = s.proof.paper_tex.find("\\title{") {
+                                        let after = &s.proof.paper_tex[start + 7..];
+                                        if let Some(end) = after.find('}') {
+                                            let title = after[..end].trim();
+                                            if !title.is_empty() {
+                                                s.title = title.replace("\\(", "").replace("\\)", "").to_string();
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                            // Paper is auto-generated in persist_write on every save
                         }
                         if let Some(session) = state.current_session().cloned() {
                             let s = store.clone();

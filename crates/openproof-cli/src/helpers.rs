@@ -23,13 +23,19 @@ pub fn persist_write(
     write: PendingWrite,
 ) {
     let session_id = write.session.id.clone();
-    // Regenerate paper_tex from current state before saving
+    // Only auto-generate paper if the model hasn't written one.
+    // If paper_tex already has a \documentclass or \section, the model wrote it -- keep it.
     let mut session = write.session;
-    session.proof.paper_tex = generate_paper_tex(
-        &session.title,
-        session.proof.problem.as_deref().unwrap_or(""),
-        &session.proof.nodes,
-    );
+    let has_model_paper = session.proof.paper_tex.contains("\\documentclass")
+        || session.proof.paper_tex.contains("\\begin{proof}")
+        || session.proof.paper_tex.contains("\\begin{theorem}");
+    if !has_model_paper {
+        session.proof.paper_tex = generate_paper_tex(
+            &session.title,
+            session.proof.problem.as_deref().unwrap_or(""),
+            &session.proof.nodes,
+        );
+    }
     let write = PendingWrite { session };
     tokio::spawn(async move {
         let outcome = tokio::task::spawn_blocking(move || store.save_session(&write.session))

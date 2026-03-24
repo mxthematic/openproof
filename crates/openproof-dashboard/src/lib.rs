@@ -279,6 +279,10 @@ fn generate_tex(session: &SessionSnapshot) -> String {
 
     // If the model has written a LaTeX paper body, use it directly.
     if !proof.paper_tex.trim().is_empty() {
+        // If paper_tex is already a complete document, return it as-is
+        if proof.paper_tex.contains("\\documentclass") {
+            return proof.paper_tex.clone();
+        }
         let mut doc = String::new();
         doc.push_str("\\documentclass[11pt]{article}\n");
         doc.push_str("\\usepackage[margin=1in]{geometry}\n");
