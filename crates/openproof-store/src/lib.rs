@@ -10,6 +10,7 @@ mod sessions;
 mod store;
 
 pub use store::{AppStore, StorePaths};
+pub use corpus::{stable_hash as corpus_hash, sanitize_identity_segment};
 
 #[cfg(test)]
 mod tests {

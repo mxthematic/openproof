@@ -20,7 +20,7 @@ pub(crate) fn next_store_id(prefix: &str) -> String {
     format!("{prefix}_{ts}_{seq}")
 }
 
-pub(crate) fn stable_hash(input: &str) -> String {
+pub fn stable_hash(input: &str) -> String {
     let mut hash: u64 = 0xcbf29ce484222325;
     for byte in input.as_bytes() {
         hash ^= u64::from(*byte);
@@ -29,7 +29,7 @@ pub(crate) fn stable_hash(input: &str) -> String {
     format!("{hash:016x}")
 }
 
-pub(crate) fn sanitize_identity_segment(input: &str) -> String {
+pub fn sanitize_identity_segment(input: &str) -> String {
     let mut value = input
         .chars()
         .map(|ch| {

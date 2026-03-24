@@ -419,11 +419,25 @@ pub fn populate_knowledge_graph(store: &AppStore, session_id: &str) {
     }
     let parsed = openproof_lean::parse_lean_declarations(&all_lean);
     let all_names: Vec<&str> = parsed.iter().map(|d| d.name.as_str()).collect();
+    // Build identity keys matching the format used by record_verification_result:
+    // user-verified/{session_id}/{label}/{hash_of_signature}
+    let key_for = |name: &str, sig: &str| -> String {
+        format!("user-verified/{}/{}/{}",
+            openproof_store::sanitize_identity_segment(session_id),
+            openproof_store::sanitize_identity_segment(name),
+            openproof_store::corpus_hash(sig),
+        )
+    };
+    // Build a lookup from name -> (name, signature)
+    let sig_map: std::collections::HashMap<&str, &str> = parsed.iter()
+        .map(|d| (d.name.as_str(), d.signature.as_str())).collect();
     for decl in &parsed {
-        let from_key = format!("user-verified/{}/{}", session_id, decl.name);
+        let from_key = key_for(&decl.name, &decl.signature);
         for dep in openproof_lean::parse::extract_dependencies(&decl.body, &all_names, &decl.name) {
-            let to_key = format!("user-verified/{}/{}", session_id, dep);
-            let _ = store.add_corpus_edge(&from_key, &to_key, "uses", 1.0);
+            if let Some(&dep_sig) = sig_map.get(dep.as_str()) {
+                let to_key = key_for(&dep, dep_sig);
+                let _ = store.add_corpus_edge(&from_key, &to_key, "uses", 1.0);
+            }
         }
         let _ = store.auto_tag_from_module(&from_key, &decl.name);
     }
