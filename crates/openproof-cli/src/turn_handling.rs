@@ -275,9 +275,22 @@ pub async fn run_agentic_loop(
         }
         if !all_lean.trim().is_empty() {
             let _ = tx.send(AppEvent::WorkspaceContentSync {
-                content: all_lean,
+                content: all_lean.clone(),
                 verified: last_verify_ok,
             });
+
+            // If verified, trigger the full verification pipeline
+            // (corpus indexing, knowledge graph, cloud sync).
+            if last_verify_ok {
+                let has_sorry = all_lean.contains("sorry");
+                let _ = tx.send(AppEvent::LeanVerifyFinished(
+                    openproof_protocol::LeanVerificationSummary {
+                        ok: !has_sorry,
+                        rendered_scratch: all_lean,
+                        ..Default::default()
+                    },
+                ));
+            }
         }
     }
 
