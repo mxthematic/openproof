@@ -260,21 +260,44 @@ pub async fn run_autonomous(
         }
         if !all_lean.trim().is_empty() {
             if let Some(s) = state.current_session_mut() {
-                if s.proof.active_node_id.is_none() {
-                    if let Some(first) = s.proof.nodes.first() {
-                        eprintln!("[run] Setting active_node_id to first node: {}", first.label);
-                        s.proof.active_node_id = Some(first.id.clone());
-                    }
-                }
-                if let Some(node_id) = s.proof.active_node_id.clone() {
-                    if let Some(node) = s.proof.nodes.iter_mut().find(|n| n.id == node_id) {
-                        if node.content.trim().is_empty() {
-                            eprintln!("[run] Syncing workspace -> node.content ({} chars)", all_lean.len());
-                            node.content = all_lean;
+                // Parse declarations and rebuild nodes from workspace code
+                let parsed = openproof_lean::parse_lean_declarations(&all_lean);
+                if !parsed.is_empty() {
+                    let now = chrono::Utc::now().to_rfc3339();
+                    let parsed_nodes = openproof_lean::declarations_to_proof_nodes(&parsed, &s.id);
+                    let old_statuses: std::collections::HashMap<String, openproof_protocol::ProofNodeStatus> =
+                        s.proof.nodes.iter().map(|n| (n.label.clone(), n.status)).collect();
+
+                    s.proof.nodes = parsed_nodes.iter().map(|pn| {
+                        let mut node = pn.clone();
+                        if let Some(&prev) = old_statuses.get(&node.label) {
+                            if prev == openproof_protocol::ProofNodeStatus::Verified && !node.content.contains("sorry") {
+                                node.status = prev;
+                            }
+                        }
+                        if node.content.contains("sorry") {
+                            node.status = openproof_protocol::ProofNodeStatus::Proving;
+                        } else if !node.content.trim().is_empty() {
                             node.status = openproof_protocol::ProofNodeStatus::Proving;
                         }
+                        node.updated_at = now.clone();
+                        node
+                    }).collect();
+
+                    eprintln!("[run] Parsed {} declarations from workspace", s.proof.nodes.len());
+
+                    if let Some(root) = s.proof.nodes.first() {
+                        s.proof.root_node_id = Some(root.id.clone());
                     }
                 }
+
+                // Set active to first unverified root
+                s.proof.active_node_id = s.proof.nodes.iter()
+                    .find(|n| n.depth == 0 && n.status != openproof_protocol::ProofNodeStatus::Verified)
+                    .or_else(|| s.proof.nodes.first())
+                    .map(|n| n.id.clone());
+
+                s.proof.last_rendered_scratch = Some(all_lean);
             }
             if let Some(session) = state.current_session().cloned() {
                 let s = store.clone();
