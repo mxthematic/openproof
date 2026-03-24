@@ -81,15 +81,17 @@ impl AppState {
                 session.proof.scratch_path = Some(result.scratch_path.clone());
             }
 
-            // Parse the Lean file to extract proof tree structure
+            // Parse the Lean file to extract proof tree structure.
+            // Only replace the full node list if the parsed result has MORE
+            // declarations than the current list. Otherwise the rendered_scratch
+            // might only contain one node (the active one), and replacing would
+            // wipe multi-theorem sessions.
             let parsed_decls = openproof_lean::parse_lean_declarations(&result.rendered_scratch);
-            if !parsed_decls.is_empty() {
+            if !parsed_decls.is_empty() && parsed_decls.len() >= session.proof.nodes.len() {
                 let parsed_nodes = openproof_lean::declarations_to_proof_nodes(
                     &parsed_decls,
                     &session.id,
                 );
-                // Replace all nodes with the Lean-parsed tree (authoritative source)
-                // Keep the status of existing nodes (verified/failed/pending)
                 let old_statuses: std::collections::HashMap<String, ProofNodeStatus> = session
                     .proof.nodes.iter()
                     .map(|n| (n.label.clone(), n.status))
@@ -100,8 +102,6 @@ impl AppState {
 
                 session.proof.nodes = parsed_nodes.iter().map(|pn| {
                     let mut node = pn.clone();
-                    // Only preserve old verified status if verification succeeded.
-                    // When verification fails (sorry, type errors, etc.), reset everything.
                     if result.ok {
                         if let Some(&prev_status) = old_statuses.get(&node.label) {
                             if prev_status != ProofNodeStatus::Pending {
@@ -113,13 +113,11 @@ impl AppState {
                     node
                 }).collect();
 
-                // Restore active node by label
                 if let Some(label) = &active_label {
                     session.proof.active_node_id = session.proof.nodes.iter()
                         .find(|n| &n.label == label)
                         .map(|n| n.id.clone());
                 }
-                // Set root node
                 if let Some(root) = session.proof.nodes.first() {
                     session.proof.root_node_id = Some(root.id.clone());
                 }
