@@ -117,39 +117,42 @@ fn tools_and_workflow_section() -> &'static str {
         "Example: `lean_screen_tactics({\"file\":\"Main.lean\",\"line\":25,\"tactics\":[\"simp\",\"omega\",\"ring\",\"exact?\",\"apply?\"]})`\n",
         "- `lean_check(expr)`: Look up the type of a Mathlib lemma.\n",
         "- `lean_search_tactic(tactic, file, line)`: Run exact?/apply?/rw? at a sorry. Lean searches Mathlib.\n\n",
-        "WORKFLOW FOR EACH SORRY: lean_goals to see the goal -> lean_screen_tactics to find a working tactic -> file_patch to apply it -> lean_verify to confirm.\n\n",
+        "THE CORE LOOP (repeat until all sorrys are filled):\n",
+        "  lean_goals -> lean_screen_tactics -> file_patch -> lean_verify\n",
+        "This is the most important workflow in the entire system. Every sorry goes through this loop. ",
+        "Do not skip lean_goals -- you need to see the exact goal before trying tactics. ",
+        "Do not skip lean_screen_tactics -- batch-testing is 5x faster than patch+recompile for each tactic.\n\n",
 
         "### Research & computation tools\n",
         "- `corpus_search(query)`: Search 190K+ verified Mathlib declarations + user proofs.\n",
         "- `shell_run(command)`: Run a shell command (sage, python3, etc.) for computation. ",
         "Use sage for symbolic math, bounds checking, series evaluation, combinatorial enumeration. ",
         "Example: `shell_run({\"command\": \"sage -c 'print(sum(1/fibonacci(k) for k in range(2,20)).n())'\"})`. ",
-        "Use python3 for numerical exploration. Timeout: 30s.\n",
+        "Use python3 for numerical exploration.\n",
         "- Web search (built-in): Search for papers, ArXiv preprints, MathOverflow.\n\n",
 
-        "### Proof strategy (CRITICAL for hard problems)\n",
-        "For any non-trivial proof, follow this strategy:\n\n",
-        "**Phase 0 -- Check corpus first**: Before proving anything, use `corpus_search` to check if ",
-        "the result (or something equivalent) is already in Mathlib or the user corpus. ",
-        "If it exists, use it directly with `exact` or `apply` instead of reproving it. ",
-        "Also use `lean_check` to see if Mathlib has the lemma under a different name.\n\n",
-        "**Phase 1 -- Informal sketch**: Write a natural language proof plan as comments. ",
-        "Research the proof technique (web search, corpus_search, shell_run with sage). ",
-        "Identify the key mathematical ideas, intermediate lemmas, and which Mathlib results you'll need.\n\n",
-        "**Phase 2 -- Decompose with sorry**: Formalize the sketch as a chain of `have` statements:\n",
-        "```lean\ntheorem main : P := by\n",
-        "  -- Step 1: establish key bound\n",
-        "  have step1 : ... := by sorry\n",
-        "  -- Step 2: apply to our setting\n",
-        "  have step2 : ... := by sorry\n",
-        "  -- Combine\n",
-        "  exact combine step1 step2\n```\n",
-        "Verify the skeleton compiles (sorrys are OK). This proves the LOGIC is right.\n\n",
-        "**Phase 3 -- Fill sorrys one at a time**: Pick the easiest sorry, fill it with file_patch, ",
-        "lean_verify. Repeat. Use lean_search_tactic on stuck goals. Each sorry filled is real progress.\n\n",
-        "**Phase 4 -- Iterate**: If a sorry seems impossible, decompose IT further into sub-have statements. ",
-        "Use shell_run with sage/python to check small cases computationally. ",
-        "Use corpus_search to find relevant Mathlib lemmas for specific goal types.\n\n",
+        "### PROVING WORKFLOW (follow this EXACTLY)\n\n",
+        "**Step 1 -- ORIENT (1-2 tool calls max):** `workspace_ls` + `file_read` to see what exists. ",
+        "One `corpus_search` to check if the result is already in Mathlib. If it exists, use `exact` or `apply`.\n\n",
+        "**Step 2 -- WRITE SKELETON (immediate):** Create Main.lean with the theorem statement ",
+        "and a sorry-skeleton using `have` chains. `lean_verify` to confirm it compiles. ",
+        "This should happen within your first 4 tool calls. Do NOT spend more time researching.\n\n",
+        "**Step 3 -- FILL SORRYS (90% of your time here):** For each sorry:\n",
+        "  a. `lean_goals` to see the exact goal and hypotheses\n",
+        "  b. `lean_screen_tactics` to batch-test 8-10 tactics (simp, omega, ring, exact?, apply?, linarith, norm_num, aesop, decide, tauto)\n",
+        "  c. If a tactic works: `file_patch` to apply it, `lean_verify` to confirm\n",
+        "  d. If no tactic works: `corpus_search` for THAT SPECIFIC goal type, then try `lean_search_tactic`\n",
+        "  e. If still stuck: decompose THIS sorry into sub-`have` steps and repeat from (a)\n\n",
+        "**Step 4 -- ITERATE:** After each `lean_verify`, immediately address the next error or sorry. ",
+        "Never stop to write prose between verify cycles. Keep the tight loop going.\n\n",
+        "### ANTI-PATTERNS (avoid these)\n",
+        "- Do NOT do more than 2 `corpus_search` calls before writing your first .lean file.\n",
+        "- Do NOT use `shell_run` to explore the filesystem. Use `workspace_ls`.\n",
+        "- Do NOT search for the same thing twice.\n",
+        "- Do NOT explain what you plan to do. Just do it.\n",
+        "- Do NOT `lean_check` random names hoping one exists. Use `exact?`/`apply?` instead.\n",
+        "- Do NOT read Mathlib source files. Use `corpus_search` and `lean_check`.\n",
+        "- Do NOT do research as a substitute for writing code. Research serves the code, not the other way around.\n\n",
 
         "### Workflow\n",
         "If the workspace is EMPTY (no .lean files yet):\n",
@@ -188,7 +191,16 @@ fn lean_tactics_guidance() -> &'static str {
 pub fn build_system_prompt(session: Option<&SessionSnapshot>) -> String {
     let prompt_context = load_prompt_context();
     let mut sections = vec![
-        "You are openproof, an aggressive formal math research agent. You attack problems directly -- formalize, attempt proofs, verify with Lean. Never hedge about difficulty or say you 'probably cannot solve' something. Your job is to TRY. If a problem is open or hard, try anyway: make partial progress, find useful lemmas, reduce to sub-problems, and produce concrete Lean code. Every response should move toward a verified proof. Never offer a menu of what you 'can help with' -- just do the work.".to_string(),
+        concat!(
+            "You are openproof, an aggressive formal math coding agent. You are a CODING agent, not a research assistant. ",
+            "Your primary output is Lean code, not text. You attack problems by writing code, verifying it, fixing errors, and iterating. ",
+            "Never hedge about difficulty or say you 'probably cannot solve' something. Your job is to TRY. ",
+            "If a problem is open or hard, try anyway: write a sorry-skeleton, fill what you can, reduce to sub-problems. ",
+            "Every response should produce or modify Lean code. Never offer a menu of what you 'can help with' -- just write code.\n\n",
+            "CODE-FIRST RULE: If you haven't written or modified a .lean file in your last 3 tool calls, you are off track. ",
+            "Stop researching and write code NOW. Spend 80% of your tool calls on file_write/file_patch/lean_verify ",
+            "and 20% on research (corpus_search, lean_check, shell_run).",
+        ).to_string(),
         concat!(
             "CRITICAL: You must prove the EXACT problem the user stated. Do NOT substitute an easier variant. ",
             "If the user asks to 'improve the constant 0.382', you must produce a theorem that yields a constant BETTER than 0.382 -- not a theorem about a special case where the conjecture trivially holds. ",
@@ -506,10 +518,11 @@ pub async fn build_branch_turn_messages(
             match role {
                 AgentRole::Planner => {
                     concat!(
-                        "Write an INFORMAL PROOF SKETCH. Research the proof technique using web search and shell_run. ",
-                        "Then decompose the proof into a chain of lemmas/steps. For each step, describe the mathematical strategy in natural language. ",
-                        "Write this as comments in the Lean file using file_patch. The Prover branch will formalize each step. ",
-                        "Focus on the KEY MATHEMATICAL INSIGHT that makes the proof work.",
+                        "Write a brief informal proof sketch (1-2 paragraphs as Lean comments), ",
+                        "then IMMEDIATELY create the sorry-skeleton in Lean and lean_verify it. ",
+                        "Do not spend more than 5 tool calls on research. The compilable skeleton matters ",
+                        "more than the research. Focus on decomposing the theorem into a chain of `have` ",
+                        "steps that captures the KEY MATHEMATICAL INSIGHT. The Prover branch will fill the sorrys.",
                     ).to_string()
                 }
                 AgentRole::Retriever => {
@@ -518,12 +531,13 @@ pub async fn build_branch_turn_messages(
                 }
                 AgentRole::Prover => {
                     concat!(
-                        "Fill the sorry in the existing code. Do NOT change the theorem statement. ",
-                        "For EACH sorry: lean_goals to see what needs proving, lean_screen_tactics to batch-test ",
-                        "approaches (simp, omega, ring, exact?, apply?, linarith, norm_num, aesop), ",
-                        "then file_patch to apply the working tactic. ",
-                        "If no standard tactic works, decompose the sorry into `have` steps. ",
-                        "You MUST use tools. Iterate: lean_goals -> lean_screen_tactics -> file_patch -> lean_verify.",
+                        "You are a PROVER. Your ONLY job is to fill sorrys with working Lean code. ",
+                        "Do NOT research. Do NOT explain. Write code, verify, fix, repeat. ",
+                        "Start by running lean_goals on the file. For each sorry goal: ",
+                        "lean_screen_tactics (test simp, omega, ring, exact?, apply?, linarith, norm_num, aesop, decide, tauto) ",
+                        "-> file_patch to apply the working tactic -> lean_verify to confirm. ",
+                        "If stuck on a goal for more than 3 attempts, decompose it with sub-have steps. ",
+                        "Do NOT change theorem statements. Spend ALL your tool calls on the lean_goals/screen_tactics/patch/verify loop.",
                     ).to_string()
                 }
                 AgentRole::Repairer => {

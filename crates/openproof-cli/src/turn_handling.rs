@@ -22,7 +22,7 @@ use openproof_store::AppStore;
 use tokio::sync::mpsc;
 
 /// Maximum number of tool-loop iterations per turn.
-const MAX_TOOL_ITERATIONS: usize = 25;
+const MAX_TOOL_ITERATIONS: usize = 40;
 
 pub fn handle_submission(
     tx: mpsc::UnboundedSender<AppEvent>,
