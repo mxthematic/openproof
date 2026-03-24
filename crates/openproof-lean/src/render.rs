@@ -8,15 +8,7 @@ pub fn render_node_scratch(session: &SessionSnapshot, node: &ProofNode) -> Strin
     let raw_content = clean_lean_content(node.content.trim());
     let raw_content = raw_content.trim();
 
-    // If the content has import statements and there are no sibling nodes,
-    // it's a self-contained file -- use as-is.
-    let has_siblings = session.proof.nodes.iter()
-        .any(|n| n.id != node.id && !n.content.trim().is_empty());
-    if raw_content.starts_with("import ") && !has_siblings {
-        return raw_content.to_string();
-    }
-
-    // Strip imports from active node content (we add our own)
+    // Strip imports/open from content -- we add our own imports at the top.
     let content = strip_imports(raw_content);
     let content = content.trim();
 
