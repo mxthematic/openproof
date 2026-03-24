@@ -96,7 +96,7 @@ impl AppState {
             created_at: now.clone(),
         };
         if let Some(session) = self.current_session_mut() {
-            session.updated_at = now;
+            session.updated_at = now.clone();
             if let Some(question) = session.proof.pending_question.as_mut() {
                 if question.status != "resolved" {
                     question.answer_text = Some(text.clone());
@@ -104,6 +104,30 @@ impl AppState {
                 }
             }
             session.transcript.push(entry.clone());
+
+            // Create a node eagerly from the user's message if none exist.
+            // This ensures the dashboard shows something immediately.
+            if session.proof.nodes.is_empty() && !text.starts_with('/') {
+                let label = text.chars().take(60).collect::<String>();
+                let node = openproof_protocol::ProofNode {
+                    id: next_id("node"),
+                    kind: openproof_protocol::ProofNodeKind::Theorem,
+                    label: label.clone(),
+                    statement: text.clone(),
+                    content: String::new(),
+                    status: openproof_protocol::ProofNodeStatus::Pending,
+                    parent_id: None,
+                    depends_on: Vec::new(),
+                    depth: 0,
+                    created_at: now.clone(),
+                    updated_at: now,
+                };
+                session.proof.active_node_id = Some(node.id.clone());
+                session.proof.root_node_id = Some(node.id.clone());
+                session.proof.problem = Some(text.clone());
+                session.proof.nodes.push(node);
+            }
+
             let session_snapshot = session.clone();
             let submitted = SubmittedInput {
                 session_id: session.id.clone(),
