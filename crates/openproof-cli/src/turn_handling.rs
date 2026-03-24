@@ -82,11 +82,7 @@ pub async fn run_agentic_loop(
     // Spawn lean-lsp-mcp for structured goal access (tools: lean_goals, lean_screen_tactics).
     // Falls back gracefully if unavailable.
     let lsp_mcp: Option<Arc<Mutex<LeanLspMcp>>> = LeanLspMcp::spawn(&project_dir)
-        .map(|client| {
-            eprintln!("[lsp-mcp] Spawned lean-lsp-mcp for session {session_id}");
-            Arc::new(Mutex::new(client))
-        })
-        .map_err(|e| eprintln!("[lsp-mcp] Not available (tools will use fallback): {e}"))
+        .map(|client| Arc::new(Mutex::new(client)))
         .ok();
 
     for iteration in 0..MAX_TOOL_ITERATIONS {
@@ -148,7 +144,7 @@ pub async fn run_agentic_loop(
                 let imports = session.proof.imports.clone();
                 for call in &result.tool_calls {
                     // Emit tool call event for transcript.
-                    eprintln!("[tool] {} ({})", call.name, call.arguments.chars().take(80).collect::<String>());
+                    // Tool call logged via ToolCallReceived event
                     let _ = tx.send(AppEvent::ToolCallReceived {
                         call_id: call.call_id.clone(),
                         tool_name: call.name.clone(),
@@ -172,7 +168,7 @@ pub async fn run_agentic_loop(
 
                         // Cloud semantic search
                         let cloud_client = openproof_cloud::CloudCorpusClient::new(Default::default());
-                        eprintln!("[corpus] Cloud available: {:?}", cloud_client.availability());
+                        let _ = cloud_client.availability();
                         match cloud_client.search_semantic(&query, 10).await {
                             Ok(semantic_hits) => {
                                 for hit in &semantic_hits {
@@ -183,7 +179,7 @@ pub async fn run_agentic_loop(
                                 }
                             }
                             Err(e) => {
-                                eprintln!("[corpus] Cloud semantic search error: {e}");
+                                let _ = e;
                             }
                         }
 
@@ -229,10 +225,6 @@ pub async fn run_agentic_loop(
                     }
 
                     // Emit tool result event for transcript.
-                    eprintln!("[tool] {} -> {} ({})",
-                        call.name,
-                        if output.success { "ok" } else { "FAIL" },
-                        output.content.chars().take(120).collect::<String>());
                     let _ = tx.send(AppEvent::ToolResultReceived {
                         call_id: call.call_id.clone(),
                         tool_name: call.name.clone(),

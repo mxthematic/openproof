@@ -493,7 +493,7 @@ fn tool_workspace_ls(ctx: &ToolContext) -> Result<ToolOutput> {
     if !ctx.workspace_dir.exists() {
         return Ok(ToolOutput {
             success: true,
-            content: "(empty workspace)".to_string(),
+            content: "(empty workspace)\n\nYour next step: file_write Main.lean with the theorem statement and sorry-skeleton.".to_string(),
         });
     }
     let mut entries = Vec::new();
@@ -502,7 +502,7 @@ fn tool_workspace_ls(ctx: &ToolContext) -> Result<ToolOutput> {
     if entries.is_empty() {
         Ok(ToolOutput {
             success: true,
-            content: "(empty workspace)".to_string(),
+            content: "(empty workspace)\n\nYour next step: file_write Main.lean with the theorem statement and sorry-skeleton.".to_string(),
         })
     } else {
         Ok(ToolOutput {
