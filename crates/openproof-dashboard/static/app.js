@@ -393,7 +393,7 @@ function GraphTab({ session }) {
   const attemptNum = proof?.attempt_number || proof?.attemptNumber || 0;
 
   return h`
-    <div className="graph-canvas" style=${{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, minHeight: 400 }}>
+    <div className="graph-canvas" style=${{ display: "flex", flexDirection: "column", height: "100%", minHeight: "500px" }}>
       <div className="graph-info">
         <span>Phase: <strong>${proof?.phase || "idle"}</strong></span>
         <span>\u00a0\u00b7\u00a0 Proof nodes: ${proofNodes.length}</span>
@@ -411,7 +411,7 @@ function GraphTab({ session }) {
           </span>
         ` : null}
       </div>
-      <div style=${{ width: "100%", height: "calc(100% - 40px)" }}>
+      <div style=${{ flex: 1, width: "100%", minHeight: "400px" }}>
         <${ReactFlow}
           nodes=${rfNodes}
           edges=${rfEdges}
