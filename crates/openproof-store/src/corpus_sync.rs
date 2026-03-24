@@ -429,7 +429,7 @@ impl AppStore {
         Ok(())
     }
 
-    /// Get items connected to a given item in the knowledge graph.
+    /// Get items connected to a given item via corpus relationships.
     pub fn get_related_items(
         &self,
         item_key: &str,

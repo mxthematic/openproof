@@ -399,8 +399,8 @@ pub fn embed_verified_item(
     });
 }
 
-/// Populate knowledge graph edges and tags from workspace .lean files.
-/// Called after successful verification to build the corpus graph.
+/// Index verified declarations: extract dependency edges and domain tags.
+/// Called after successful verification.
 pub fn populate_knowledge_graph(store: &AppStore, session_id: &str) {
     let ws_dir = store.workspace_dir(session_id);
     let mut all_lean = String::new();

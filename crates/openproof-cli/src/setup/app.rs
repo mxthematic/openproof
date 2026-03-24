@@ -37,7 +37,7 @@ pub const PROVIDERS: &[(&str, &str, bool)] = &[
 ];
 
 pub const CORPUS_MODES: &[(&str, &str)] = &[
-    ("cloud", "Cloud (recommended) -- shared verified corpus, your proofs contribute back"),
+    ("cloud", "Cloud (recommended) -- faster proofs, larger search corpus"),
     ("local", "Local only -- auto-imports Mathlib, no network"),
 ];
 

@@ -280,7 +280,7 @@ pub async fn run_agentic_loop(
             });
 
             // If verified, trigger the full verification pipeline
-            // (corpus indexing, knowledge graph, cloud sync).
+            // (corpus indexing, cloud sync).
             if last_verify_ok {
                 let has_sorry = all_lean.contains("sorry");
                 let _ = tx.send(AppEvent::LeanVerifyFinished(

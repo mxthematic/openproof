@@ -371,7 +371,7 @@ impl CloudCorpusClient {
         Ok(hits)
     }
 
-    /// Upload a failed attempt to the cloud for cross-session learning.
+    /// Upload a failed attempt to the cloud.
     pub async fn upload_failed_attempt(
         &self,
         attempt: serde_json::Value,
@@ -423,7 +423,7 @@ impl CloudCorpusClient {
             .unwrap_or_default())
     }
 
-    /// Upload corpus edges to cloud knowledge graph.
+    /// Upload corpus edges to cloud.
     pub async fn upload_corpus_edges(
         &self,
         edges: serde_json::Value,

@@ -129,7 +129,7 @@ fn draw_corpus_step(f: &mut Frame, app: &SetupApp, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            "  The corpus stores verified Lean theorems for retrieval during proofs.",
+            "  Cloud mode connects to OpenProof servers for faster, more accurate proofs.",
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(""),
@@ -182,7 +182,7 @@ fn draw_finish(f: &mut Frame, app: &SetupApp, area: Rect) {
             ))
         } else {
             Line::from(Span::styled(
-                "  Your verified proofs will contribute to the shared corpus.",
+                "  Connected to OpenProof cloud.",
                 Style::default().fg(Color::DarkGray),
             ))
         },
