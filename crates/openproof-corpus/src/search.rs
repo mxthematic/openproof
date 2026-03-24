@@ -195,17 +195,23 @@ pub async fn drain_sync_queue(
         });
     }
 
-    // Extract identity keys from job payloads
+    // Extract identity keys from job payloads.
+    // Payloads have format: {"items": [{"identityKey": "...", ...}]}
     let mut identity_keys = Vec::new();
     for job in &pending_jobs {
         if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&job.payload_json) {
-            if let Some(keys) = payload
-                .get("itemIdentityKeys")
-                .and_then(|v| v.as_array())
-            {
+            // Try "itemIdentityKeys" (old format) and "items[].identityKey" (current format)
+            if let Some(keys) = payload.get("itemIdentityKeys").and_then(|v| v.as_array()) {
                 for k in keys {
                     if let Some(s) = k.as_str() {
                         identity_keys.push(s.to_string());
+                    }
+                }
+            }
+            if let Some(items) = payload.get("items").and_then(|v| v.as_array()) {
+                for item in items {
+                    if let Some(key) = item.get("identityKey").and_then(|v| v.as_str()) {
+                        identity_keys.push(key.to_string());
                     }
                 }
             }
