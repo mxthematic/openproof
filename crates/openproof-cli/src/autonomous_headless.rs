@@ -177,6 +177,14 @@ pub async fn run_autonomous(
                 AppEvent::AppendNotice { title, content } => {
                     eprintln!("[run] {title}: {}", &content[..content.len().min(200)]);
                 }
+                AppEvent::ToolCallReceived { tool_name, .. } => {
+                    eprintln!("[run] TOOL: {tool_name}");
+                }
+                AppEvent::ToolResultReceived { tool_name, success, output, .. } => {
+                    eprintln!("[run] RESULT: {tool_name} -> {} ({})",
+                        if *success { "ok" } else { "FAIL" },
+                        output.chars().take(100).collect::<String>());
+                }
                 _ => {}
             }
             let _ = state.apply(event);
