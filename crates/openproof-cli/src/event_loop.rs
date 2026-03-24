@@ -227,24 +227,61 @@ pub async fn run_app(
                         }
                     }
                     if !all_lean.trim().is_empty() {
-                        eprintln!("[tui-sync] Syncing {} chars from workspace", all_lean.len());
                         if let Some(s) = state.current_session_mut() {
-                            // Ensure active_node_id is set
-                            if s.proof.active_node_id.is_none() {
-                                if let Some(first) = s.proof.nodes.first() {
-                                    s.proof.active_node_id = Some(first.id.clone());
+                            // Parse Lean declarations and rebuild nodes from the actual code.
+                            // Each theorem/lemma/def becomes a node. This keeps nodes
+                            // in sync with what's actually in the workspace files.
+                            let parsed = openproof_lean::parse_lean_declarations(&all_lean);
+                            if !parsed.is_empty() {
+                                let now = chrono::Utc::now().to_rfc3339();
+                                let parsed_nodes = openproof_lean::declarations_to_proof_nodes(
+                                    &parsed, &s.id,
+                                );
+                                // Preserve status of existing nodes by label
+                                let old_statuses: std::collections::HashMap<String, openproof_protocol::ProofNodeStatus> =
+                                    s.proof.nodes.iter().map(|n| (n.label.clone(), n.status)).collect();
+                                let active_label = s.proof.active_node_id.as_deref()
+                                    .and_then(|id| s.proof.nodes.iter().find(|n| n.id == id))
+                                    .map(|n| n.label.clone());
+
+                                s.proof.nodes = parsed_nodes.iter().map(|pn| {
+                                    let mut node = pn.clone();
+                                    // Preserve old status unless it was stale
+                                    if let Some(&prev) = old_statuses.get(&node.label) {
+                                        if prev != openproof_protocol::ProofNodeStatus::Pending {
+                                            node.status = prev;
+                                        }
+                                    }
+                                    // Mark sorry-containing nodes as Proving
+                                    if node.content.contains("sorry") {
+                                        node.status = openproof_protocol::ProofNodeStatus::Proving;
+                                    }
+                                    node.updated_at = now.clone();
+                                    node
+                                }).collect();
+
+                                // Restore active node by label
+                                if let Some(label) = &active_label {
+                                    s.proof.active_node_id = s.proof.nodes.iter()
+                                        .find(|n| &n.label == label).map(|n| n.id.clone());
+                                }
+                                if s.proof.active_node_id.is_none() {
+                                    s.proof.active_node_id = s.proof.nodes.first().map(|n| n.id.clone());
+                                }
+                                if let Some(root) = s.proof.nodes.first() {
+                                    s.proof.root_node_id = Some(root.id.clone());
                                 }
                             }
+
+                            // Also store the full workspace content on the active node
                             if let Some(node_id) = s.proof.active_node_id.clone() {
                                 if let Some(node) = s.proof.nodes.iter_mut().find(|n| n.id == node_id) {
-                                    if node.content.trim().is_empty() || node.content != all_lean {
+                                    if node.content.trim().is_empty() {
                                         node.content = all_lean.clone();
-                                        if all_lean.contains("sorry") && node.status == openproof_protocol::ProofNodeStatus::Verified {
-                                            node.status = openproof_protocol::ProofNodeStatus::Proving;
-                                        }
                                     }
                                 }
                             }
+                            s.proof.last_rendered_scratch = Some(all_lean.clone());
                             // Extract title from workspace file comments if still default
                             if s.title == "OpenProof Rust Session" || s.title.trim().is_empty() {
                                 for line in all_lean.lines() {

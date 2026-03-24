@@ -62,6 +62,7 @@ pub async fn start_dashboard_server(
         .route("/api/raw-state", get(status))
         .route("/api/paper/tex", get(paper_tex))
         .route("/api/paper/pdf", get(paper_pdf))
+        .route("/api/workspace", get(workspace_files))
         .with_state(state);
 
     let primary_port = preferred_port.unwrap_or(4821);
@@ -237,6 +238,39 @@ async fn paper_pdf(
 
     let pdf_bytes = std::fs::read(&pdf_path).map_err(|e| internal_error(e.into()))?;
     Ok(([(CONTENT_TYPE, "application/pdf")], pdf_bytes).into_response())
+}
+
+async fn workspace_files(
+    State(state): State<Arc<DashboardState>>,
+    Query(query): Query<SessionQuery>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let session = match query.id.as_deref() {
+        Some(id) => state.store.get_session(id).map_err(internal_error)?,
+        None => state.store.latest_session().map_err(internal_error)?,
+    };
+    let Some(session) = session else {
+        return Ok("[]".to_string().into_response());
+    };
+    let ws_dir = state.store.workspace_dir(&session.id);
+    let mut result = String::from("[");
+    let mut first = true;
+    if let Ok(entries) = state.store.list_workspace_files(&session.id) {
+        for (path, _size) in entries {
+            if path.ends_with(".lean") && !path.contains("history/") {
+                let content = std::fs::read_to_string(ws_dir.join(&path)).unwrap_or_default();
+                if !first { result.push(','); }
+                first = false;
+                // Manual JSON to avoid serde_json dependency
+                let escaped = content.replace('\\', "\\\\").replace('"', "\\\"")
+                    .replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t");
+                result.push_str(&format!(
+                    "{{\"path\":\"{path}\",\"content\":\"{escaped}\"}}"
+                ));
+            }
+        }
+    }
+    result.push(']');
+    Ok(([(CONTENT_TYPE, "application/json")], result).into_response())
 }
 
 fn generate_tex(session: &SessionSnapshot) -> String {
