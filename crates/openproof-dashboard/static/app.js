@@ -99,7 +99,7 @@ function App() {
 
       <div className="main-area">
         <div className="tabs">
-          ${["overview", "graph", "paper"].map((t) => h`
+          ${["overview", "graph", "code", "paper"].map((t) => h`
             <button key=${t}
               className=${`tab ${tab === t ? "tab-active" : ""}`}
               onClick=${() => setTab(t)}>
@@ -111,6 +111,7 @@ function App() {
           ${!session ? h`<div className="empty">Select a session</div>`
             : tab === "overview" ? h`<${OverviewTab} session=${session} />`
             : tab === "graph" ? h`<${GraphTab} session=${session} />`
+            : tab === "code" ? h`<${CodeTab} sessionId=${selectedId} />`
             : h`<${PaperTab} sessionId=${selectedId} />`}
         </div>
       </div>
@@ -445,6 +446,64 @@ function GraphTab({ session }) {
 }
 
 // ── Paper Tab ───────────────────────────────────────────────────────────
+
+function CodeTab({ sessionId }) {
+  const [files, setFiles] = useState([]);
+  const [selected, setSelected] = useState(null);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    let c = false;
+    async function poll() {
+      try {
+        const r = await fetch(`/api/workspace?id=${encodeURIComponent(sessionId)}`);
+        const d = await r.json();
+        if (!c) {
+          const f = d.files || d || [];
+          setFiles(f);
+          if (!selected && f.length > 0) setSelected(f[0].path);
+        }
+      } catch {}
+    }
+    poll();
+    const t = setInterval(poll, 3000);
+    return () => { c = true; clearInterval(t); };
+  }, [sessionId]);
+
+  const current = files.find(f => f.path === selected);
+
+  return h`
+    <div style=${{ display: "flex", height: "100%", gap: 0 }}>
+      <div style=${{ width: 180, borderRight: "1px solid #262626", padding: "8px 0", overflow: "auto" }}>
+        ${files.map(f => h`
+          <button key=${f.path}
+            onClick=${() => setSelected(f.path)}
+            style=${{
+              display: "block", width: "100%", textAlign: "left",
+              padding: "6px 12px", border: "none", cursor: "pointer",
+              background: selected === f.path ? "#1a1a1a" : "transparent",
+              color: selected === f.path ? "#e5e5e5" : "#737373",
+              fontSize: 12, fontFamily: "monospace",
+            }}>
+            ${f.path}
+          </button>
+        `)}
+      </div>
+      <div style=${{ flex: 1, overflow: "auto", padding: 16 }}>
+        ${current ? h`
+          <div style=${{ fontFamily: "monospace", fontSize: 12, color: "#e5e5e5", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+            ${(current.content || "").split("\\n").map((line, i) => h`
+              <div key=${i} style=${{ display: "flex" }}>
+                <span style=${{ color: "#525252", width: 40, textAlign: "right", paddingRight: 12, userSelect: "none", flexShrink: 0 }}>${i + 1}</span>
+                <span>${line}</span>
+              </div>
+            `)}
+          </div>
+        ` : h`<div style=${{ color: "#737373", padding: 20 }}>Select a file</div>`}
+      </div>
+    </div>
+  `;
+}
 
 function PaperTab({ sessionId }) {
   const [view, setView] = useState("pdf"); // "pdf" or "tex"
