@@ -55,6 +55,13 @@ pub async fn run_app(
                 schedule_autonomous_tick(tx.clone(), store.clone(), state);
                 continue;
             }
+            // Drop stale events from a cancelled turn
+            if !state.turn_in_flight && matches!(&event,
+                AppEvent::StreamDelta(_) | AppEvent::StreamFinished |
+                AppEvent::ReasoningStarted | AppEvent::ToolLoopIteration(_)
+            ) {
+                continue;
+            }
             let verification_result = match &event {
                 AppEvent::LeanVerifyFinished(result) => Some(result.clone()),
                 _ => None,
@@ -469,7 +476,10 @@ fn handle_normal_mode_key(
             state.turn_in_flight = false;
             state.turn_started_at = None;
             state.streaming_text.clear();
-            state.status = "Aborted.".to_string();
+            state.tool_loop_active = false;
+            state.current_tool_name = None;
+            state.verification_in_flight = false;
+            state.status = "Cancelled.".to_string();
             None
         }
         KeyCode::Esc if !state.composer.is_empty() => {
