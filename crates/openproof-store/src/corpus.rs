@@ -397,9 +397,6 @@ impl AppStore {
         }
 
         tx.commit()?;
-        if result.ok {
-            let _ = self.rebuild_verified_corpus_clusters()?;
-        }
         Ok(())
     }
 
