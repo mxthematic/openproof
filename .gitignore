@@ -9,3 +9,4 @@ lean/build/
 target/
 CLAUDE.md
 benchmarks/miniF2F-lean4/
+vendor/

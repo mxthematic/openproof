@@ -3,6 +3,7 @@
 pub mod goal_state;
 pub mod goals;
 pub mod lsp_mcp;
+pub mod pantograph;
 pub mod parse;
 pub mod patch;
 pub mod render;
