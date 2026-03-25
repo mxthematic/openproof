@@ -86,13 +86,13 @@ pub(crate) fn dedup_strings(values: Vec<String>) -> Vec<String> {
     result
 }
 
-/// Strip `import` and `open` lines from the beginning of Lean content.
+/// Strip all `import` and top-level `open` lines from Lean content.
 fn strip_imports(content: &str) -> String {
     content
         .lines()
-        .skip_while(|line| {
+        .filter(|line| {
             let t = line.trim();
-            t.is_empty() || t.starts_with("import ") || t.starts_with("open ")
+            !t.starts_with("import ") && !t.starts_with("open ")
         })
         .collect::<Vec<_>>()
         .join("\n")
