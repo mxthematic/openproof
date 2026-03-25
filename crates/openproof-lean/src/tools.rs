@@ -75,20 +75,7 @@ fn tool_lean_verify(args: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
     let content = fs::read_to_string(&target)
         .with_context(|| format!("reading {file}"))?;
 
-    // If the content already has imports, use as-is. Otherwise prepend imports.
-    let full_content = if content.trim_start().starts_with("import ") {
-        content
-    } else {
-        let imports = if ctx.imports.is_empty() {
-            vec!["Mathlib".to_string()]
-        } else {
-            ctx.imports.to_vec()
-        };
-        let mut lines: Vec<String> = imports.iter().map(|i| format!("import {i}")).collect();
-        lines.push(String::new());
-        lines.push(content);
-        lines.join("\n")
-    };
+    let full_content = build_compilation_unit(&content, ctx);
 
     let scratch_path = write_temp_file(&full_content)?;
     let (ok, output) = run_lean_command(ctx.project_dir, &scratch_path)?;
@@ -98,6 +85,65 @@ fn tool_lean_verify(args: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
         success: ok && !has_sorry,
         content: truncate_output(&output),
     })
+}
+
+/// Build a complete compilation unit from file content.
+/// Includes imports, corpus declarations (from CorpusHits.lean), and the file content.
+/// This makes corpus-retrieved declarations available via `exact <name>`.
+fn build_compilation_unit(content: &str, ctx: &ToolContext) -> String {
+    // Split content into imports and body
+    let (user_imports, body) = if content.trim_start().starts_with("import ") {
+        let mut imports = Vec::new();
+        let mut body_start = 0;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("import ") || trimmed.starts_with("open ") || trimmed.is_empty() {
+                imports.push(line.to_string());
+                body_start += line.len() + 1; // +1 for newline
+            } else {
+                break;
+            }
+        }
+        let body = if body_start < content.len() {
+            &content[body_start..]
+        } else {
+            ""
+        };
+        (imports, body.to_string())
+    } else {
+        let imports: Vec<String> = if ctx.imports.is_empty() {
+            vec!["import Mathlib".to_string()]
+        } else {
+            ctx.imports.iter().map(|i| format!("import {i}")).collect()
+        };
+        (imports, content.to_string())
+    };
+
+    let mut lines = user_imports;
+    lines.push(String::new());
+
+    // Inject corpus declarations if CorpusHits.lean exists in workspace
+    let corpus_path = ctx.workspace_dir.join("CorpusHits.lean");
+    if corpus_path.exists() {
+        if let Ok(corpus_content) = fs::read_to_string(&corpus_path) {
+            let corpus_body = corpus_content
+                .lines()
+                .filter(|l| {
+                    let t = l.trim();
+                    !t.starts_with("import ") && !t.starts_with("open ")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !corpus_body.trim().is_empty() {
+                lines.push("-- [corpus: verified declarations from previous sessions]".to_string());
+                lines.push(corpus_body);
+                lines.push(String::new());
+            }
+        }
+    }
+
+    lines.push(body);
+    lines.join("\n")
 }
 
 fn tool_lean_goals(args: &Value, ctx: &ToolContext) -> Result<ToolOutput> {

@@ -406,7 +406,7 @@ pub fn populate_knowledge_graph(store: &AppStore, session_id: &str) {
     let mut all_lean = String::new();
     if let Ok(files) = store.list_workspace_files(session_id) {
         for (path, _) in &files {
-            if path.ends_with(".lean") && !path.contains("history/") {
+            if path.ends_with(".lean") && !path.contains("history/") && path != "CorpusHits.lean" {
                 if let Ok(content) = std::fs::read_to_string(ws_dir.join(path)) {
                     if !all_lean.is_empty() { all_lean.push_str("\n\n"); }
                     all_lean.push_str(&content);

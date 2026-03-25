@@ -262,7 +262,7 @@ pub async fn run_autonomous(
         let mut all_lean = String::new();
         if let Ok(files) = store.list_workspace_files(&session_id) {
             for (path, _) in &files {
-                if path.ends_with(".lean") && !path.contains("history/") {
+                if path.ends_with(".lean") && !path.contains("history/") && path != "CorpusHits.lean" {
                     if let Ok(content) = std::fs::read_to_string(ws_dir.join(path)) {
                         if !all_lean.is_empty() {
                             all_lean.push_str("\n\n");
@@ -335,7 +335,7 @@ pub async fn run_autonomous(
         let mut lean_candidates: Vec<String> = Vec::new();
         if let Ok(files) = store.list_workspace_files(&session.id) {
             for (path, _) in &files {
-                if path.ends_with(".lean") && !path.contains("history/") {
+                if path.ends_with(".lean") && !path.contains("history/") && path != "CorpusHits.lean" {
                     if let Ok(content) = std::fs::read_to_string(ws_dir.join(path)) {
                         if !content.trim().is_empty() && !lean_candidates.iter().any(|c| c == &content) {
                             lean_candidates.push(content);
@@ -547,7 +547,7 @@ pub async fn run_autonomous(
             let mut all_lean = String::new();
             if let Ok(files) = store.list_workspace_files(&sid) {
                 for (path, _) in &files {
-                    if path.ends_with(".lean") && !path.contains("history/") {
+                    if path.ends_with(".lean") && !path.contains("history/") && path != "CorpusHits.lean" {
                         if let Ok(content) = std::fs::read_to_string(ws_dir.join(path)) {
                             if !all_lean.is_empty() {
                                 all_lean.push_str("\n\n");

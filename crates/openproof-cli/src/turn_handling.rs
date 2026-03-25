@@ -181,64 +181,79 @@ pub async fn run_agentic_loop(
                         let mut results = Vec::new();
 
                         // Local FTS search (with graph expansion)
+                        let mut has_verified_proof = false;
+                        let mut corpus_declarations = Vec::new();
                         if let Ok(local_hits) = store.search_verified_corpus(&query, 10) {
                             for (label, statement, _vis) in &local_hits {
-                                // For user-verified items, include the full proof code
                                 if let Ok(Some(proof_code)) = store.get_artifact_content(label) {
+                                    has_verified_proof = true;
+                                    corpus_declarations.push(proof_code.clone());
                                     results.push(format!(
-                                        "*** PREVIOUSLY VERIFIED (reuse this proof): ***\n- {label} :: {statement}\n```lean\n{}\n```",
-                                        if proof_code.len() > 2000 { &proof_code[..2000] } else { &proof_code }
+                                        "*** VERIFIED PROOF LOADED into your environment -- use `exact {label}` or reference it directly: ***\n- {label} :: {statement}"
                                     ));
                                 } else {
                                     results.push(format!("- {label} :: {statement}"));
                                 }
                             }
                         }
+                        // Write corpus declarations to workspace so lean_verify can compile them
+                        if !corpus_declarations.is_empty() {
+                            let workspace_dir = store.workspace_dir(session_id);
+                            let corpus_path = workspace_dir.join("CorpusHits.lean");
+                            let _ = std::fs::write(
+                                &corpus_path,
+                                format!("import Mathlib\n\n{}", corpus_declarations.join("\n\n")),
+                            );
+                        }
 
-                        // Cloud semantic search + edge expansion
-                        let cloud_client = openproof_cloud::CloudCorpusClient::new(Default::default());
-                        let _ = cloud_client.availability();
-                        let mut cloud_identity_keys: Vec<String> = Vec::new();
-                        match cloud_client.search_semantic(&query, 10).await {
-                            Ok(semantic_hits) => {
-                                for hit in &semantic_hits {
-                                    cloud_identity_keys.push(hit.identity_key.clone());
-                                    let line = format!("- {} (sim:{:.2}) :: {}", hit.label, hit.score, hit.statement);
-                                    if !results.iter().any(|r| r.contains(&hit.label)) {
-                                        results.push(line);
+                        // Skip slow cloud queries when we already have a verified proof with code.
+                        // Cloud expansion is only useful when the local corpus doesn't have the answer.
+                        if !has_verified_proof {
+                            // Cloud semantic search + edge expansion
+                            let cloud_client = openproof_cloud::CloudCorpusClient::new(Default::default());
+                            let _ = cloud_client.availability();
+                            let mut cloud_identity_keys: Vec<String> = Vec::new();
+                            match cloud_client.search_semantic(&query, 10).await {
+                                Ok(semantic_hits) => {
+                                    for hit in &semantic_hits {
+                                        cloud_identity_keys.push(hit.identity_key.clone());
+                                        let line = format!("- {} (sim:{:.2}) :: {}", hit.label, hit.score, hit.statement);
+                                        if !results.iter().any(|r| r.contains(&hit.label)) {
+                                            results.push(line);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("[corpus] cloud semantic search error: {e}");
+                                }
+                            }
+
+                            // Cloud edge expansion: for top hits, find 1-hop neighbors
+                            for key in cloud_identity_keys.iter().take(3) {
+                                if let Ok(related) = cloud_client.get_related_items(key, 5).await {
+                                    for item in &related {
+                                        if !results.iter().any(|r| r.contains(&item.label)) {
+                                            results.push(format!(
+                                                "- {} ({}) :: {}",
+                                                item.label, item.edge_type, item.statement
+                                            ));
+                                        }
                                     }
                                 }
                             }
-                            Err(e) => {
-                                eprintln!("[corpus] cloud semantic search error: {e}");
-                            }
-                        }
 
-                        // Cloud edge expansion: for top hits, find 1-hop neighbors
-                        for key in cloud_identity_keys.iter().take(3) {
-                            if let Ok(related) = cloud_client.get_related_items(key, 5).await {
-                                for item in &related {
-                                    if !results.iter().any(|r| r.contains(&item.label)) {
-                                        results.push(format!(
-                                            "- {} ({}) :: {}",
-                                            item.label, item.edge_type, item.statement
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-
-                        // Cloud failure search: surface known-bad approaches
-                        if let Ok(failures) = cloud_client.search_failures(&query, 5).await {
-                            if !failures.is_empty() {
-                                results.push(String::new());
-                                results.push("KNOWN FAILURES (do NOT repeat these approaches):".to_string());
-                                for f in &failures {
-                                    let class = f.get("failureClass").and_then(|v| v.as_str()).unwrap_or("");
-                                    let snippet = f.get("snippet").and_then(|v| v.as_str()).unwrap_or("");
-                                    let diag = f.get("diagnostic").and_then(|v| v.as_str()).unwrap_or("");
-                                    if !snippet.is_empty() || !diag.is_empty() {
-                                        results.push(format!("  [{class}] {} -> {}", &snippet[..snippet.len().min(120)], &diag[..diag.len().min(120)]));
+                            // Cloud failure search: surface known-bad approaches
+                            if let Ok(failures) = cloud_client.search_failures(&query, 5).await {
+                                if !failures.is_empty() {
+                                    results.push(String::new());
+                                    results.push("KNOWN FAILURES (do NOT repeat these approaches):".to_string());
+                                    for f in &failures {
+                                        let class = f.get("failureClass").and_then(|v| v.as_str()).unwrap_or("");
+                                        let snippet = f.get("snippet").and_then(|v| v.as_str()).unwrap_or("");
+                                        let diag = f.get("diagnostic").and_then(|v| v.as_str()).unwrap_or("");
+                                        if !snippet.is_empty() || !diag.is_empty() {
+                                            results.push(format!("  [{class}] {} -> {}", &snippet[..snippet.len().min(120)], &diag[..diag.len().min(120)]));
+                                        }
                                     }
                                 }
                             }
@@ -320,7 +335,7 @@ pub async fn run_agentic_loop(
         let mut all_lean = String::new();
         if let Ok(files) = store.list_workspace_files(session_id) {
             for (path, _) in &files {
-                if path.ends_with(".lean") && !path.contains("history/") {
+                if path.ends_with(".lean") && !path.contains("history/") && path != "CorpusHits.lean" {
                     if let Ok(content) = std::fs::read_to_string(workspace_dir.join(path)) {
                         if !all_lean.is_empty() {
                             all_lean.push_str("\n\n");
@@ -528,7 +543,7 @@ pub fn start_agent_branch_turn(
             let mut all_lean = String::new();
             if let Ok(files) = store.list_workspace_files(&session_snapshot.id) {
                 for (path, _) in &files {
-                    if path.ends_with(".lean") && !path.contains("history/") {
+                    if path.ends_with(".lean") && !path.contains("history/") && path != "CorpusHits.lean" {
                         if let Ok(content) = std::fs::read_to_string(ws_dir.join(path)) {
                             if !all_lean.is_empty() {
                                 all_lean.push_str("\n\n");

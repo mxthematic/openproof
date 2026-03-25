@@ -125,11 +125,14 @@ pub fn build_system_prompt(session: Option<&SessionSnapshot>) -> String {
         concat!(
             "You are openproof, a formal math coding agent. You work like a software engineer: write code, compile, fix errors, iterate. ",
             "Your workflow is:\n",
-            "1. Write a .lean file with the theorem and a sorry-skeleton (have chains). Verify it compiles.\n",
+            "0. FIRST: call `corpus_search(query)` to check if a verified proof already exists. ",
+            "If it says `VERIFIED PROOF LOADED`, the declaration is already in your compilation environment. ",
+            "Just write your theorem using `exact <name>` and lean_verify -- it will work.\n",
+            "1. If no existing proof: write a .lean file with the theorem and a sorry-skeleton (have chains). Verify it compiles.\n",
             "2. For each sorry: lean_goals -> lean_screen_tactics -> file_patch -> lean_verify.\n",
             "3. Repeat step 2 until all sorrys are filled.\n\n",
-            "That's it. This is the entire job. Everything else -- corpus_search, lean_check, web search -- ",
-            "exists only to support steps 1-3. Never research as a substitute for writing code.",
+            "That's it. This is the entire job. Everything else -- lean_check, web search -- ",
+            "exists only to support steps 0-3. Never research as a substitute for writing code.",
         ).to_string(),
         tools_and_workflow_section().to_string(),
         lean_tactics_guidance().to_string(),
@@ -299,23 +302,56 @@ pub async fn retrieval_context(store: &AppStore, session: Option<&SessionSnapsho
     }
 
     let mut sections = Vec::new();
+    // Cloud-first corpus search when cloud is enabled, local as fallback
+    let mut corpus_hits: Vec<(String, String, String)> = Vec::new();
+    if session.cloud.share_mode != ShareMode::Local {
+        let client = openproof_cloud::CloudCorpusClient::new(Default::default());
+        if let Ok(remote) = client.search_verified_remote(&query, 10, session.cloud.share_mode, None).await {
+            for hit in &remote {
+                corpus_hits.push((hit.label.clone(), hit.statement.clone(), "cloud".to_string()));
+            }
+        }
+    }
+    // Supplement with local results (dedup by label)
     if let Ok(local_hits) = store.search_verified_corpus(&query, 6) {
-        if !local_hits.is_empty() {
-            let hit_count = local_hits.len();
-            sections.push(format!(
-                "Verified corpus ({hit_count} relevant results):\n{}",
-                local_hits
-                    .into_iter()
-                    .map(|(label, statement, visibility)| {
-                        format!("- {} [{}] :: {}", label, visibility, statement)
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            ));
-            sections.push(
-                "Use these verified results directly if they apply. They are proven correct.".to_string()
+        for (label, statement, visibility) in local_hits {
+            if !corpus_hits.iter().any(|(l, _, _)| l == &label) {
+                corpus_hits.push((label, statement, visibility));
+            }
+        }
+    }
+
+    if !corpus_hits.is_empty() {
+        let hit_count = corpus_hits.len();
+        let mut hit_lines = Vec::new();
+        let mut corpus_declarations = Vec::new();
+        for (label, statement, visibility) in &corpus_hits {
+            if let Ok(Some(proof_code)) = store.get_artifact_content(label) {
+                corpus_declarations.push(proof_code.clone());
+                hit_lines.push(format!(
+                    "*** VERIFIED PROOF LOADED -- use `exact {label}` ***\n- {label} [{visibility}] :: {statement}"
+                ));
+            } else {
+                hit_lines.push(format!("- {} [{}] :: {}", label, visibility, statement));
+            }
+        }
+        // Write corpus declarations to workspace for lean_verify to compile them
+        if !corpus_declarations.is_empty() {
+            let workspace_dir = store.workspace_dir(&session.id);
+            let corpus_path = workspace_dir.join("CorpusHits.lean");
+            let _ = std::fs::create_dir_all(&workspace_dir);
+            let _ = std::fs::write(
+                &corpus_path,
+                format!("import Mathlib\n\n{}", corpus_declarations.join("\n\n")),
             );
         }
+        sections.push(format!(
+            "Verified corpus ({hit_count} relevant results):\n{}",
+            hit_lines.join("\n")
+        ));
+        sections.push(
+            "Verified proofs above are auto-loaded into your compilation environment. Use `exact <name>` to reference them directly.".to_string()
+        );
     }
     if let Some(remote_hits) = remote_verified_hits(session, &query, 4).await {
         if !remote_hits.is_empty() {
@@ -481,7 +517,7 @@ pub async fn build_branch_turn_messages(
     if let Ok(files) = store.list_workspace_files(&session.id) {
         let ws_dir = store.workspace_dir(&session.id);
         let lean_files: Vec<_> = files.iter()
-            .filter(|(p, _)| p.ends_with(".lean") && !p.contains("history/"))
+            .filter(|(p, _)| p.ends_with(".lean") && !p.contains("history/") && p != "CorpusHits.lean")
             .collect();
         if !lean_files.is_empty() {
             for (path, _) in &lean_files {

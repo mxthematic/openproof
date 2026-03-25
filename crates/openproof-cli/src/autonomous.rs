@@ -569,7 +569,7 @@ pub fn run_autonomous_step(
         // Show workspace files
         if let Ok(files) = store.list_workspace_files(&latest_session.id) {
             let lean_files: Vec<_> = files.iter()
-                .filter(|(p, _)| p.ends_with(".lean") && !p.contains("history/"))
+                .filter(|(p, _)| p.ends_with(".lean") && !p.contains("history/") && p != "CorpusHits.lean")
                 .collect();
             if !lean_files.is_empty() {
                 ctx.push_str("Workspace files:\n");
@@ -1011,7 +1011,7 @@ fn spawn_tactic_search_for_sorrys(
     let mut full_content = String::new();
     if let Ok(files) = store.list_workspace_files(&session.id) {
         for (path, _) in &files {
-            if path.ends_with(".lean") && !path.contains("history/") {
+            if path.ends_with(".lean") && !path.contains("history/") && path != "CorpusHits.lean" {
                 if let Ok(content) = std::fs::read_to_string(workspace_dir.join(path)) {
                     if !full_content.is_empty() {
                         full_content.push_str("\n\n");
