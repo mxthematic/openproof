@@ -479,7 +479,7 @@ pub fn generate_paper_tex(
         if !node.content.trim().is_empty() {
             tex.push_str("\\begin{lstlisting}[language=Lean]\n");
             let code = if node.content.len() > 3000 {
-                &node.content[..3000]
+                &node.content.chars().take(3000).collect::<String>()
             } else {
                 &node.content
             };

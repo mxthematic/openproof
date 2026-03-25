@@ -923,7 +923,7 @@ pub async fn drain_until_settled(
                         }
                     }
                     AppEvent::AppendNotice { title, content } => {
-                        eprintln!("[run] {title}: {}", &content[..content.len().min(200)]);
+                        eprintln!("[run] {title}: {}", content.chars().take(200).collect::<String>());
                     }
                     AppEvent::PersistSucceeded(_) | AppEvent::PersistFailed(_) => {}
                     _ => {}

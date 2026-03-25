@@ -149,10 +149,18 @@ pub fn render_entry(entry: &openproof_protocol::TranscriptEntry) -> Vec<Line<'st
                 ),
             ]));
             for ol in &output_lines {
-                lines.push(Line::from(Span::styled(
-                    format!("   {ol}"),
-                    Style::default().fg(Color::DarkGray),
-                )));
+                // Color diff lines in tool output (green for +, red for -)
+                let trimmed = ol.trim();
+                let style = if trimmed.starts_with('+') && !trimmed.starts_with("+++") {
+                    Style::default().fg(Color::Green)
+                } else if trimmed.starts_with('-') && !trimmed.starts_with("---") {
+                    Style::default().fg(Color::Red)
+                } else if trimmed.starts_with("@@") {
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+                lines.push(Line::from(Span::styled(format!("   {ol}"), style)));
             }
             if truncated {
                 lines.push(Line::from(Span::styled(
@@ -363,10 +371,17 @@ fn draw_chat_area(f: &mut custom_terminal::Frame<'_>, state: &mut AppState, area
                                     ),
                                 ]));
                                 for ol in &output_lines {
-                                    lines.push(Line::from(Span::styled(
-                                        format!("   {ol}"),
-                                        Style::default().fg(Color::DarkGray),
-                                    )));
+                                    let trimmed = ol.trim();
+                                    let style = if trimmed.starts_with('+') && !trimmed.starts_with("+++") {
+                                        Style::default().fg(Color::Green)
+                                    } else if trimmed.starts_with('-') && !trimmed.starts_with("---") {
+                                        Style::default().fg(Color::Red)
+                                    } else if trimmed.starts_with("@@") {
+                                        Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM)
+                                    } else {
+                                        Style::default().fg(Color::DarkGray)
+                                    };
+                                    lines.push(Line::from(Span::styled(format!("   {ol}"), style)));
                                 }
                                 if truncated {
                                     lines.push(Line::from(Span::styled(

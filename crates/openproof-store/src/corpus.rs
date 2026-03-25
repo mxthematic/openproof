@@ -371,7 +371,7 @@ impl AppStore {
                 format!("{}::{}::{}", node.statement, node.content, failure_class).as_str(),
             );
             let diagnostic_summary = summarize_lean_diagnostic(result);
-            let snippet_short = &node.content[..node.content.len().min(200)];
+            let snippet_short: String = node.content.chars().take(200).collect();
             tx.execute(
                 r#"
                 INSERT INTO attempt_logs

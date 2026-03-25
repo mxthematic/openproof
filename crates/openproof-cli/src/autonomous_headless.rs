@@ -186,7 +186,7 @@ pub async fn run_autonomous(
                     }
                 }
                 AppEvent::AppendNotice { title, content } => {
-                    eprintln!("[run] {title}: {}", &content[..content.len().min(200)]);
+                    eprintln!("[run] {title}: {}", content.chars().take(200).collect::<String>());
                 }
                 AppEvent::ToolCallReceived { tool_name, .. } => {
                     eprintln!("[run] TOOL: {tool_name}");
