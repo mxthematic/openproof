@@ -225,6 +225,11 @@ pub fn draw(frame: &mut custom_terminal::Frame<'_>, state: &mut AppState) {
         .split(area);
 
     draw_chat_area(frame, state, chunks[0]);
+    // Force-clear input + status areas so the diff always repaints them.
+    // This prevents keystrokes from "leaking" into the chat area during
+    // rapid tool call updates.
+    frame.render_widget(Clear, chunks[1]);
+    frame.render_widget(Clear, chunks[2]);
     draw_input_area(frame, state, chunks[1]);
 
     if state.command_mode {
