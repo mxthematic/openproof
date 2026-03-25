@@ -91,18 +91,10 @@ fn tool_lean_verify(args: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
     let scratch_path = write_temp_file(&full_content)?;
     let (ok, output) = run_lean_command(ctx.project_dir, &scratch_path)?;
     let has_sorry = output.contains("declaration uses 'sorry'");
-    let mut result = truncate_output(&output);
-
-    // Append workflow hint based on result
-    if !ok {
-        result.push_str("\n\nNext: file_read the file, find the error line, file_patch to fix it, lean_verify again.");
-    } else if has_sorry {
-        result.push_str("\n\nNext: lean_goals to see sorry goals, then lean_screen_tactics to find working tactics.");
-    }
 
     Ok(ToolOutput {
         success: ok && !has_sorry,
-        content: result,
+        content: truncate_output(&output),
     })
 }
 
@@ -493,7 +485,7 @@ fn tool_workspace_ls(ctx: &ToolContext) -> Result<ToolOutput> {
     if !ctx.workspace_dir.exists() {
         return Ok(ToolOutput {
             success: true,
-            content: "(empty workspace)\n\nYour next step: file_write Main.lean with the theorem statement and sorry-skeleton.".to_string(),
+            content: "(empty workspace)".to_string(),
         });
     }
     let mut entries = Vec::new();
@@ -502,7 +494,7 @@ fn tool_workspace_ls(ctx: &ToolContext) -> Result<ToolOutput> {
     if entries.is_empty() {
         Ok(ToolOutput {
             success: true,
-            content: "(empty workspace)\n\nYour next step: file_write Main.lean with the theorem statement and sorry-skeleton.".to_string(),
+            content: "(empty workspace)".to_string(),
         })
     } else {
         Ok(ToolOutput {
