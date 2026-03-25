@@ -155,14 +155,24 @@ pub async fn run_autonomous(
         eprintln!("[run] Running initial agentic turn (with tools: lean_verify, file_write, corpus_search, etc.)...");
         let _ = state.apply(AppEvent::TurnStarted);
 
-        // Use the full agentic loop so the model can write files, verify, patch, search
+        // Spawn Pantograph for fast tactic testing (~18s Mathlib import, then 3ms/tactic)
+        let project_dir = crate::helpers::resolve_lean_project_dir();
+        let prover: Option<openproof_lean::proof_tree::SharedProver> =
+            openproof_lean::proof_tree::SessionProver::spawn(&project_dir)
+                .map(|sp| {
+                    eprintln!("[run] Pantograph ready (Mathlib loaded)");
+                    std::sync::Arc::new(std::sync::Mutex::new(sp))
+                })
+                .map_err(|e| eprintln!("[run] Pantograph not available: {e}"))
+                .ok();
+
         run_agentic_loop(
             tx.clone(),
             store.clone(),
             &session.id,
             messages,
             &session,
-            None, // headless mode: no shared Pantograph (spawns its own if needed)
+            prover.clone(),
         )
         .await;
 
