@@ -126,8 +126,8 @@ pub fn build_system_prompt(session: Option<&SessionSnapshot>) -> String {
             "You are openproof, a formal math coding agent. You work like a software engineer: write code, compile, fix errors, iterate. ",
             "Your workflow is:\n",
             "0. FIRST: call `corpus_search(query)` to check if a verified proof already exists. ",
-            "If the result says `VERIFIED PROOF available via import OpenProof.Corpus`, the declaration is compiled in your environment. ",
-            "Just write `import OpenProof.Corpus` at the top, then `exact <name>` in your proof -- it compiles directly.\n",
+            "If the result says `VERIFIED PROOF available`, the declaration is auto-imported into your compilation. ",
+            "Just use `exact <name>` in your proof -- it compiles directly. Do NOT write `import OpenProof.Corpus` yourself; the system handles it.\n",
             "1. If no existing proof: write a .lean file with the theorem and a sorry-skeleton (have chains). Verify it compiles.\n",
             "2. For each sorry: lean_goals -> lean_screen_tactics -> file_patch -> lean_verify.\n",
             "3. Repeat step 2 until all sorrys are filled.\n\n",
@@ -327,7 +327,7 @@ pub async fn retrieval_context(store: &AppStore, session: Option<&SessionSnapsho
         for (label, statement, visibility) in &corpus_hits {
             if store.get_artifact_content(label).ok().flatten().is_some() {
                 hit_lines.push(format!(
-                    "*** VERIFIED -- use `import OpenProof.Corpus` then `exact {label}` ***\n- {label} [{visibility}] :: {statement}"
+                    "*** VERIFIED -- use `exact {label}` directly (auto-imported) ***\n- {label} [{visibility}] :: {statement}"
                 ));
             } else {
                 hit_lines.push(format!("- {} [{}] :: {}", label, visibility, statement));
@@ -338,7 +338,7 @@ pub async fn retrieval_context(store: &AppStore, session: Option<&SessionSnapsho
             hit_lines.join("\n")
         ));
         sections.push(
-            "Verified proofs above are compiled in OpenProof.Corpus. Add `import OpenProof.Corpus` to your file and use `exact <name>`.".to_string()
+            "Verified proofs above are auto-imported. Use `exact <name>` directly -- no import needed.".to_string()
         );
     }
     if let Some(remote_hits) = remote_verified_hits(session, &query, 4).await {

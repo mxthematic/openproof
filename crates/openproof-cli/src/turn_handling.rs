@@ -189,7 +189,7 @@ pub async fn run_agentic_loop(
                                     // Corpus proofs are available via `import OpenProof.Corpus`
                                     // (compiled Lean module synced from cloud on startup).
                                     results.push(format!(
-                                        "*** VERIFIED PROOF available via `import OpenProof.Corpus` -- use `exact {label}` directly: ***\n- {label} :: {statement}"
+                                        "*** VERIFIED PROOF (auto-imported) -- use `exact {label}` directly: ***\n- {label} :: {statement}"
                                     ));
                                 } else {
                                     results.push(format!("- {label} :: {statement}"));

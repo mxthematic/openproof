@@ -104,39 +104,64 @@ pub async fn run_shell(launch_cwd: PathBuf) -> Result<()> {
         original_hook(info);
     }));
 
-    // Sync cloud corpus -> OpenProof/Corpus.lean -> olean (background).
+    // Build OpenProof.Corpus module from cloud + local corpus data (background).
     // Non-blocking: TUI starts immediately, corpus compiles in parallel.
     {
         let pd = resolve_lean_project_dir();
+        let store_for_corpus = store.clone();
         tokio::spawn(async move {
-            let cloud = openproof_cloud::CloudCorpusClient::new(Default::default());
-            if !cloud.is_configured() {
-                return;
-            }
             let mut all_items = Vec::new();
-            let mut offset = 0usize;
-            loop {
-                match cloud.fetch_all_user_verified(500, offset).await {
-                    Ok((items, _total)) => {
-                        let n = items.len();
-                        for item in items {
-                            all_items.push(openproof_lean::corpus_module::CorpusDeclaration {
-                                label: item.label,
-                                statement: item.statement,
-                                artifact_content: item.artifact_content,
-                            });
+
+            // Try cloud first
+            let cloud = openproof_cloud::CloudCorpusClient::new(Default::default());
+            if cloud.is_configured() {
+                let mut offset = 0usize;
+                loop {
+                    match cloud.fetch_all_user_verified(500, offset).await {
+                        Ok((items, total)) => {
+                            eprintln!("[corpus-module] Cloud: fetched {} items (total: {total})", items.len());
+                            let n = items.len();
+                            for item in items {
+                                all_items.push(openproof_lean::corpus_module::CorpusDeclaration {
+                                    label: item.label,
+                                    statement: item.statement,
+                                    artifact_content: item.artifact_content,
+                                });
+                            }
+                            if n < 500 { break; }
+                            offset += 500;
                         }
-                        if n < 500 { break; }
-                        offset += 500;
+                        Err(e) => {
+                            eprintln!("[corpus-module] Cloud fetch failed: {e}");
+                            break;
+                        }
                     }
-                    Err(_) => break,
                 }
             }
-            if !all_items.is_empty() {
-                let _ = tokio::task::spawn_blocking(move || {
-                    openproof_lean::corpus_module::build_corpus_module(&pd, &all_items)
-                }).await;
+
+            // Always supplement with local user-verified items (may have items not yet synced)
+            let local_result = tokio::task::spawn_blocking(move || {
+                store_for_corpus.list_user_verified_with_artifacts()
+            }).await;
+            if let Ok(Ok(local_items)) = local_result {
+                for (label, statement, content) in local_items {
+                    if !all_items.iter().any(|i| i.label == label) {
+                        all_items.push(openproof_lean::corpus_module::CorpusDeclaration {
+                            label, statement, artifact_content: content,
+                        });
+                    }
+                }
             }
+
+            if all_items.is_empty() {
+                eprintln!("[corpus-module] No corpus items found (cloud + local)");
+                return;
+            }
+
+            eprintln!("[corpus-module] Building module with {} declarations", all_items.len());
+            let _ = tokio::task::spawn_blocking(move || {
+                openproof_lean::corpus_module::build_corpus_module(&pd, &all_items)
+            }).await;
         });
     }
 

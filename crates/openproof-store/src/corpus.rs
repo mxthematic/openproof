@@ -750,6 +750,29 @@ impl AppStore {
         Ok(items)
     }
 
+    /// List all user-verified items with their artifact content.
+    /// Used to build the OpenProof.Corpus Lean module from local data.
+    pub fn list_user_verified_with_artifacts(&self) -> Result<Vec<(String, String, String)>> {
+        let conn = self.connect()?;
+        let mut stmt = conn.prepare(
+            r#"SELECT v.label, v.statement, a.content
+               FROM verified_corpus_items v
+               JOIN verified_artifacts a ON v.artifact_id = a.id
+               WHERE v.origin = 'user-verified'
+               ORDER BY v.created_at ASC"#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
+        let mut items = Vec::new();
+        for row in rows {
+            if let Ok(item) = row {
+                items.push(item);
+            }
+        }
+        Ok(items)
+    }
+
     /// Get the full artifact content (proof code) for a corpus item by label.
     /// Returns None if not found or if it's a library-seed item without stored artifact.
     pub fn get_artifact_content(&self, label: &str) -> Result<Option<String>> {

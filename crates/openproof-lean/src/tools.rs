@@ -119,17 +119,26 @@ fn build_compilation_unit(content: &str, ctx: &ToolContext) -> String {
         (imports, content.to_string())
     };
 
-    let mut lines = user_imports;
+    // Strip any user-written `import OpenProof.Corpus` -- we manage this automatically.
+    let mut lines: Vec<String> = user_imports
+        .into_iter()
+        .filter(|l| !l.contains("OpenProof.Corpus"))
+        .collect();
 
-    // Import the compiled corpus module if its olean exists.
-    // This makes all previously verified proofs available as native Lean declarations.
+    // Only add the corpus import if the compiled olean actually exists.
     if crate::corpus_module::corpus_olean_exists(ctx.project_dir) {
-        if !lines.iter().any(|l| l.contains("OpenProof.Corpus")) {
-            lines.push("import OpenProof.Corpus".to_string());
-        }
+        lines.push("import OpenProof.Corpus".to_string());
     }
 
     lines.push(String::new());
+
+    // Also strip corpus import from the body (model may have written it inline)
+    let body = body
+        .lines()
+        .filter(|l| !l.trim().starts_with("import OpenProof.Corpus"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
     lines.push(body);
     lines.join("\n")
 }
