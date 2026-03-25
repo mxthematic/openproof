@@ -300,6 +300,41 @@ impl AppStore {
             )?;
 
             if session.cloud.sync_enabled && session.cloud.share_mode != ShareMode::Local {
+                // Build full artifact content with imports + all sibling nodes
+                // so the cloud server can reverify the proof standalone.
+                let mut full_content = String::new();
+                let imports = if session.proof.imports.is_empty() {
+                    vec!["Mathlib".to_string()]
+                } else {
+                    session.proof.imports.clone()
+                };
+                for imp in &imports {
+                    full_content.push_str(&format!("import {imp}\n"));
+                }
+                full_content.push('\n');
+                // Include sibling nodes first (dependencies)
+                let mut seen_labels = std::collections::BTreeSet::new();
+                for sibling in &session.proof.nodes {
+                    if sibling.id == node.id || sibling.content.trim().is_empty() {
+                        continue;
+                    }
+                    if !seen_labels.insert(sibling.label.clone()) {
+                        continue;
+                    }
+                    let clean = sibling.content.lines()
+                        .filter(|l| !l.trim().starts_with("import ") && !l.trim().starts_with("open "))
+                        .collect::<Vec<_>>().join("\n");
+                    if !clean.trim().is_empty() {
+                        full_content.push_str(clean.trim());
+                        full_content.push_str("\n\n");
+                    }
+                }
+                // Add the active node
+                let clean_node = node.content.lines()
+                    .filter(|l| !l.trim().starts_with("import ") && !l.trim().starts_with("open "))
+                    .collect::<Vec<_>>().join("\n");
+                full_content.push_str(clean_node.trim());
+
                 let payload = serde_json::json!({
                     "visibilityScope": visibility,
                     "items": [{
@@ -312,7 +347,7 @@ impl AppStore {
                         "label": node.label,
                         "statement": node.statement,
                         "artifactId": artifact_id,
-                        "artifactContent": node.content,
+                        "artifactContent": full_content,
                         "visibility": visibility,
                     }]
                 });
