@@ -422,7 +422,7 @@ pub async fn run_app(
                     if state.overlay.is_some() {
                         handle_overlay_key(key, state, &tx, &store);
                     } else if state.command_mode {
-                        handle_command_mode_key(key, state, &tx, &store);
+                        handle_command_mode_key(key, state, &tx, &store, &session_prover);
                     } else {
                         handle_normal_mode_key(key, state, &tx, &store, &session_prover);
                     }

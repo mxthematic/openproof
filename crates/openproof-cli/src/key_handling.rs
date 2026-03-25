@@ -114,6 +114,7 @@ pub fn handle_command_mode_key(
     state: &mut AppState,
     tx: &mpsc::UnboundedSender<AppEvent>,
     store: &AppStore,
+    prover: &Option<openproof_lean::proof_tree::SharedProver>,
 ) {
     use crate::turn_handling::handle_submission;
 
@@ -149,7 +150,7 @@ pub fn handle_command_mode_key(
                             session: submission.session_snapshot.clone(),
                         },
                     );
-                    handle_submission(tx.clone(), store.clone(), state, submission, None);
+                    handle_submission(tx.clone(), store.clone(), state, submission, prover.clone());
                 }
             }
         }
