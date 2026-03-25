@@ -93,7 +93,7 @@ fn tools_and_workflow_section() -> &'static str {
 
         "## Sorry-filling loop\n",
         "For each sorry: `lean_goals` -> `lean_screen_tactics` (simp, omega, ring, exact?, apply?, ",
-        "linarith, norm_num, aesop, decide, tauto) -> `file_patch` -> `lean_verify`. Repeat.\n\n",
+        "linarith, norm_num, aesop, nlinarith, polyrith, field_simp, positivity) -> `file_patch` -> `lean_verify`. Repeat.\n\n",
 
         "## Avoid\n",
         "- Repeated corpus_search without writing code\n",

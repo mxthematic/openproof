@@ -583,9 +583,47 @@ impl AppStore {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         })?;
         let mut items = Vec::new();
+        let mut seen_labels = std::collections::HashSet::new();
         for row in rows {
-            items.push(row?);
+            let item: (String, String, String) = row?;
+            seen_labels.insert(item.0.clone());
+            items.push(item);
         }
+
+        // Graph expansion: find premises that the direct hits depend on.
+        if !items.is_empty() {
+            let direct_labels: Vec<String> = items.iter().map(|i| i.0.clone()).collect();
+            let placeholders = direct_labels.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let edge_sql = format!(
+                r#"SELECT DISTINCT v.label, v.statement, v.visibility
+                FROM corpus_edges e
+                JOIN verified_corpus_items v ON v.identity_key = e.to_item_key
+                JOIN verified_corpus_items f ON f.identity_key = e.from_item_key
+                WHERE f.label IN ({})
+                LIMIT ?"#,
+                placeholders
+            );
+            if let Ok(mut edge_stmt) = conn.prepare(&edge_sql) {
+                let mut edge_params: Vec<Box<dyn rusqlite::types::ToSql>> = direct_labels
+                    .iter()
+                    .map(|l| Box::new(l.clone()) as Box<dyn rusqlite::types::ToSql>)
+                    .collect();
+                edge_params.push(Box::new(limit as i64));
+                if let Ok(edge_rows) = edge_stmt.query_map(
+                    rusqlite::params_from_iter(edge_params.iter().map(|p| p.as_ref())),
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)),
+                ) {
+                    for row in edge_rows {
+                        if let Ok(item) = row {
+                            if seen_labels.insert(item.0.clone()) {
+                                items.push(item);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(items)
     }
 }

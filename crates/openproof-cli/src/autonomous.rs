@@ -1084,6 +1084,13 @@ fn spawn_tactic_search_for_sorrys(
                         "norm_cast".to_string(),
                         "positivity".to_string(),
                         "gcongr".to_string(),
+                        "polyrith".to_string(),
+                        "field_simp".to_string(),
+                        "push_cast".to_string(),
+                        "ring_nf".to_string(),
+                        "nlinarith".to_string(),
+                        "norm_num [*]".to_string(),
+                        "simp [*]".to_string(),
                     ];
                     tactics.truncate(k);
                     Ok(tactics)
