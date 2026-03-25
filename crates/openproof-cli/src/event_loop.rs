@@ -32,6 +32,14 @@ pub async fn run_app(
         .map(|s| s.id.clone())
         .unwrap_or_default();
 
+    // Spawn shared Pantograph REPL for the session (~18s Mathlib import, one-time).
+    // Shared between the agent's tool loop and the tactic search engine.
+    let project_dir = crate::helpers::resolve_lean_project_dir();
+    let session_prover: Option<openproof_lean::proof_tree::SharedProver> =
+        openproof_lean::proof_tree::SessionProver::spawn(&project_dir)
+            .map(|sp| std::sync::Arc::new(std::sync::Mutex::new(sp)))
+            .ok();
+
     loop {
         // Detect session change -- clear scrollback and reset viewport.
         let current_session_id = state
@@ -416,7 +424,7 @@ pub async fn run_app(
                     } else if state.command_mode {
                         handle_command_mode_key(key, state, &tx, &store);
                     } else {
-                        handle_normal_mode_key(key, state, &tx, &store);
+                        handle_normal_mode_key(key, state, &tx, &store, &session_prover);
                     }
                 }
                 Event::Paste(text) => {
@@ -448,6 +456,7 @@ fn handle_normal_mode_key(
     state: &mut AppState,
     tx: &mpsc::UnboundedSender<AppEvent>,
     store: &AppStore,
+    prover: &Option<openproof_lean::proof_tree::SharedProver>,
 ) {
     let next_event = match key.code {
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -594,7 +603,7 @@ fn handle_normal_mode_key(
                     session: submission.session_snapshot.clone(),
                 },
             );
-            handle_submission(tx.clone(), store.clone(), state, submission);
+            handle_submission(tx.clone(), store.clone(), state, submission, prover.clone());
         }
     }
 }

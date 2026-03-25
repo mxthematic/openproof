@@ -29,8 +29,8 @@ pub struct ToolContext<'a> {
     pub imports: &'a [String],
     /// Optional lean-lsp-mcp client for structured goal access.
     pub lsp_mcp: Option<Arc<Mutex<LeanLspMcp>>>,
-    /// Optional Pantograph REPL for fast tactic testing (~3ms per tactic).
-    pub pantograph: Option<Arc<Mutex<crate::pantograph::Pantograph>>>,
+    /// Optional shared Pantograph + proof tree state for fast tactic testing.
+    pub prover: Option<crate::proof_tree::SharedProver>,
 }
 
 /// Result of executing a tool.
@@ -209,9 +209,9 @@ fn tool_lean_screen_tactics(args: &Value, ctx: &ToolContext) -> Result<ToolOutpu
     let target = sanitize_path(ctx.workspace_dir, file)?;
 
     // Try Pantograph first (fastest: ~100ms per tactic compile vs 30s)
-    if let Some(ref panto) = ctx.pantograph {
-        if let Ok(mut pg) = panto.lock() {
-            if pg.is_alive() {
+    if let Some(ref prover) = ctx.prover {
+        if let Ok(mut sp) = prover.lock() {
+            if sp.is_alive() {
                 let content = fs::read_to_string(&target)
                     .with_context(|| format!("reading {file}"))?;
                 // Strip imports -- Pantograph has Mathlib preloaded
@@ -220,16 +220,25 @@ fn tool_lean_screen_tactics(args: &Value, ctx: &ToolContext) -> Result<ToolOutpu
                     .collect::<Vec<_>>()
                     .join("\n");
 
+                let goal_hash = crate::proof_tree::hash_goal(&format!("{file}:{line}"));
                 let mut parts = Vec::new();
                 for tactic in &tactics {
+                    // Skip tactics known to fail for this goal
+                    if sp.tree.is_known_failure(goal_hash, tactic) {
+                        parts.push(format!("[SKIPPED] {tactic} (known failure)"));
+                        continue;
+                    }
+                    sp.tree.record_attempt();
+
                     let modified = replace_sorry_at_line(&no_imports, line, tactic);
-                    match pg.verify_content(&modified) {
+                    match sp.pantograph.verify_content(&modified) {
                         Ok(result) => {
                             let status = if result.ok {
                                 "SOLVED"
                             } else if result.has_sorry {
                                 "ok"
                             } else {
+                                sp.tree.record_failure(goal_hash, tactic);
                                 "FAILED"
                             };
                             let mut entry = format!("[{status}] {tactic}");
@@ -241,6 +250,7 @@ fn tool_lean_screen_tactics(args: &Value, ctx: &ToolContext) -> Result<ToolOutpu
                             parts.push(entry);
                         }
                         Err(_) => {
+                            sp.tree.record_failure(goal_hash, tactic);
                             parts.push(format!("[FAILED] {tactic}\n  Error: Pantograph error"));
                         }
                     }

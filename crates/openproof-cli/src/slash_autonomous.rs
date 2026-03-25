@@ -281,7 +281,7 @@ pub fn cmd_answer(
                 session: submitted.session_snapshot.clone(),
             },
         );
-        handle_submission(tx, store, state, submitted);
+        handle_submission(tx, store, state, submitted, None);
     } else {
         emit_local_notice(
             tx,

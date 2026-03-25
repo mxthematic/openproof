@@ -149,7 +149,7 @@ pub fn handle_command_mode_key(
                             session: submission.session_snapshot.clone(),
                         },
                     );
-                    handle_submission(tx.clone(), store.clone(), state, submission);
+                    handle_submission(tx.clone(), store.clone(), state, submission, None);
                 }
             }
         }

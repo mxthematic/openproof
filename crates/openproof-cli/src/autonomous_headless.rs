@@ -162,6 +162,7 @@ pub async fn run_autonomous(
             &session.id,
             messages,
             &session,
+            None, // headless mode: no shared Pantograph (spawns its own if needed)
         )
         .await;
 

@@ -29,6 +29,7 @@ pub fn handle_submission(
     store: AppStore,
     state: &mut AppState,
     submission: SubmittedInput,
+    prover: Option<openproof_lean::proof_tree::SharedProver>,
 ) {
     if submission.raw_text.trim_start().starts_with('/') {
         crate::slash_commands::apply_local_command(tx, state, store, submission);
@@ -57,6 +58,7 @@ pub fn handle_submission(
             &submission.session_id,
             messages,
             &session_snapshot,
+            prover,
         )
         .await;
     });
@@ -70,6 +72,7 @@ pub async fn run_agentic_loop(
     session_id: &str,
     initial_messages: Vec<TurnMessage>,
     session: &SessionSnapshot,
+    prover: Option<openproof_lean::proof_tree::SharedProver>,
 ) {
     let mut messages = initial_messages;
     let project_dir = resolve_lean_project_dir();
@@ -87,17 +90,10 @@ pub async fn run_agentic_loop(
     let mut turn_used_tools = false;
     let mut last_verify_ok = false;
 
-    // Spawn lean-lsp-mcp for structured goal access.
+    // Spawn lean-lsp-mcp for structured goal access (fallback when Pantograph unavailable).
     let lsp_mcp: Option<Arc<Mutex<LeanLspMcp>>> = LeanLspMcp::spawn(&project_dir)
         .map(|client| Arc::new(Mutex::new(client)))
         .ok();
-
-    // Spawn Pantograph for fast tactic testing (~3ms per tactic vs 30s).
-    // Falls back to MCP or lean compile if unavailable.
-    let pantograph: Option<Arc<Mutex<openproof_lean::pantograph::Pantograph>>> =
-        openproof_lean::pantograph::Pantograph::spawn(&project_dir)
-            .map(|pg| Arc::new(Mutex::new(pg)))
-            .ok();
 
     for iteration in 0..MAX_TOOL_ITERATIONS {
         let _ = tx.send(AppEvent::ToolLoopIteration(iteration));
@@ -211,14 +207,14 @@ pub async fn run_agentic_loop(
                             let workspace_dir = workspace_dir.clone();
                             let imports = imports.clone();
                             let lsp_handle = lsp_mcp.clone();
-                            let panto_handle = pantograph.clone();
+                            let prover_handle = prover.clone();
                             move || {
                                 let ctx = ToolContext {
                                     project_dir: &project_dir,
                                     workspace_dir: &workspace_dir,
                                     imports: &imports,
                                     lsp_mcp: lsp_handle,
-                                    pantograph: panto_handle,
+                                    prover: prover_handle,
                                 };
                                 execute_tool(&name, &arguments, &ctx)
                             }
@@ -339,10 +335,9 @@ pub fn start_agent_branch_turn(
         let branch_lsp_mcp: Option<Arc<Mutex<LeanLspMcp>>> = LeanLspMcp::spawn(&project_dir)
             .map(|c| Arc::new(Mutex::new(c)))
             .ok();
-        let branch_pantograph: Option<Arc<Mutex<openproof_lean::pantograph::Pantograph>>> =
-            openproof_lean::pantograph::Pantograph::spawn(&project_dir)
-                .map(|pg| Arc::new(Mutex::new(pg)))
-                .ok();
+        // Branches don't spawn their own Pantograph -- too expensive (~18s each).
+        // They use lean-lsp-mcp for goals and the shared prover will be passed in future.
+        let branch_prover: Option<openproof_lean::proof_tree::SharedProver> = None;
 
         for _iteration in 0..MAX_TOOL_ITERATIONS {
             let result = run_codex_turn_with_events(
@@ -404,14 +399,14 @@ pub fn start_agent_branch_turn(
                                 let workspace_dir = workspace_dir.clone();
                                 let imports = imports.clone();
                                 let lsp_handle = branch_lsp_mcp.clone();
-                                let panto_handle = branch_pantograph.clone();
+                                let prover_handle = branch_prover.clone();
                                 move || {
                                     let ctx = ToolContext {
                                         project_dir: &project_dir,
                                         workspace_dir: &workspace_dir,
                                         imports: &imports,
                                         lsp_mcp: lsp_handle,
-                                        pantograph: panto_handle,
+                                        prover: prover_handle,
                                     };
                                     execute_tool(&name, &arguments, &ctx)
                                 }
@@ -751,7 +746,7 @@ pub fn submit_selected_question_option(
                 session: submitted.session_snapshot.clone(),
             },
         );
-        handle_submission(tx, store, state, submitted);
+        handle_submission(tx, store, state, submitted, None);
     }
 }
 
