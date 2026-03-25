@@ -163,13 +163,24 @@ pub(crate) fn verify_scratch(
         ));
     }
 
-    let output = Command::new("lake")
-        .arg("env")
-        .arg("lean")
-        .arg(&scratch_path)
-        .current_dir(project_dir)
-        .output()
-        .with_context(|| format!("running lake env lean {}", scratch_path.display()))?;
+    // Use cached LEAN_PATH to call lean directly (saves ~2.5s per call).
+    let output = if let Some(lean_path) = crate::tools::resolve_lean_path(project_dir) {
+        Command::new("lean")
+            .arg("--threads=4")
+            .arg(&scratch_path)
+            .env("LEAN_PATH", &lean_path)
+            .current_dir(project_dir)
+            .output()
+            .with_context(|| format!("running lean {}", scratch_path.display()))?
+    } else {
+        Command::new("lake")
+            .arg("env")
+            .arg("lean")
+            .arg(&scratch_path)
+            .current_dir(project_dir)
+            .output()
+            .with_context(|| format!("running lake env lean {}", scratch_path.display()))?
+    };
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();

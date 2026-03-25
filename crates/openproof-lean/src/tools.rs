@@ -540,18 +540,54 @@ fn build_import_block(imports: &[String]) -> String {
         .join("\n")
 }
 
-fn run_lean_command(project_dir: &Path, scratch_path: &Path) -> Result<(bool, String)> {
-    let child = Command::new("lake")
-        .arg("env")
-        .arg("lean")
-        .arg(scratch_path)
-        .current_dir(project_dir)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .context("spawning lake env lean")?;
+/// Cached LEAN_PATH resolved from `lake env` on first use.
+/// Avoids ~2.5s overhead per verification call.
+static CACHED_LEAN_PATH: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
 
-    // Wait with timeout.
+pub fn resolve_lean_path(project_dir: &Path) -> Option<String> {
+    CACHED_LEAN_PATH
+        .get_or_init(|| {
+            Command::new("lake")
+                .arg("env")
+                .arg("sh")
+                .arg("-c")
+                .arg("echo $LEAN_PATH")
+                .current_dir(project_dir)
+                .output()
+                .ok()
+                .and_then(|out| {
+                    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    if path.is_empty() { None } else { Some(path) }
+                })
+        })
+        .clone()
+}
+
+fn run_lean_command(project_dir: &Path, scratch_path: &Path) -> Result<(bool, String)> {
+    // Use cached LEAN_PATH to call lean directly (saves ~2.5s lake overhead).
+    // Falls back to `lake env lean` if path resolution fails.
+    let child = if let Some(lean_path) = resolve_lean_path(project_dir) {
+        Command::new("lean")
+            .arg("--threads=4")
+            .arg(scratch_path)
+            .env("LEAN_PATH", &lean_path)
+            .current_dir(project_dir)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .context("spawning lean with cached LEAN_PATH")?
+    } else {
+        Command::new("lake")
+            .arg("env")
+            .arg("lean")
+            .arg(scratch_path)
+            .current_dir(project_dir)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .context("spawning lake env lean")?
+    };
+
     let output = wait_with_timeout(child, Duration::from_secs(LEAN_TIMEOUT_SECS))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
