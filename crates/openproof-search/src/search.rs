@@ -22,7 +22,10 @@ use crate::config::{SearchResult, TacticSearchConfig};
 /// A node in the search tree.
 #[derive(Debug, Clone)]
 struct SearchNode {
-    /// Priority score: lower is better (fewer remaining goals).
+    /// Length-normalized priority (milliunits): lower is better.
+    /// Computed as `(remaining_goals + length_penalty * depth) * 1000`.
+    priority: u64,
+    /// Raw remaining goal count (used for best-partial tracking).
     score: usize,
     /// Tactics applied so far from the initial state.
     tactics: Vec<String>,
@@ -32,9 +35,17 @@ struct SearchNode {
     sorry_line: usize,
 }
 
+impl SearchNode {
+    fn new(goals: Vec<String>, tactics: Vec<String>, sorry_line: usize, length_penalty: f64) -> Self {
+        let score = goals.len();
+        let priority = ((score as f64 + length_penalty * tactics.len() as f64) * 1000.0) as u64;
+        Self { priority, score, tactics, goals, sorry_line }
+    }
+}
+
 impl PartialEq for SearchNode {
     fn eq(&self, other: &Self) -> bool {
-        self.score == other.score
+        self.priority == other.priority
     }
 }
 
@@ -48,9 +59,9 @@ impl PartialOrd for SearchNode {
 
 impl Ord for SearchNode {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // Min-heap by score (fewer goals = higher priority), break ties by shorter proof
-        Reverse(self.score)
-            .cmp(&Reverse(other.score))
+        // Min-heap by priority (lower = better), break ties by shorter proof
+        Reverse(self.priority)
+            .cmp(&Reverse(other.priority))
             .then_with(|| self.tactics.len().cmp(&other.tactics.len()))
     }
 }
@@ -101,14 +112,15 @@ pub fn best_first_search(
     let initial_hash = hash_goals(&initial_goals);
     seen_states.insert(initial_hash);
 
-    frontier.push(SearchNode {
-        score: initial_goals.len(),
-        tactics: vec![],
-        goals: initial_goals.clone(),
+    frontier.push(SearchNode::new(
+        initial_goals.clone(),
+        vec![],
         sorry_line,
-    });
+        config.length_penalty,
+    ));
 
     let mut best_partial = SearchNode {
+        priority: u64::MAX,
         score: usize::MAX,
         tactics: vec![],
         goals: initial_goals,
@@ -214,12 +226,12 @@ pub fn best_first_search(
             let mut new_tactics = node.tactics.clone();
             new_tactics.push(item.snippet.clone());
 
-            frontier.push(SearchNode {
-                score: new_goals.len(),
-                tactics: new_tactics,
-                goals: new_goals.clone(),
-                sorry_line: node.sorry_line,
-            });
+            frontier.push(SearchNode::new(
+                new_goals.clone(),
+                new_tactics,
+                node.sorry_line,
+                config.length_penalty,
+            ));
         }
     }
 
@@ -242,7 +254,9 @@ pub fn best_first_search(
 /// A node in the Pantograph proof search tree.
 #[derive(Debug, Clone)]
 struct PantographNode {
-    /// Priority: fewer remaining goals = better.
+    /// Length-normalized priority (milliunits): lower is better.
+    priority: u64,
+    /// Raw remaining goal count (used for best-partial tracking).
     score: usize,
     /// Pantograph state reference (immutable snapshot of proof state).
     state_id: u64,
@@ -252,8 +266,21 @@ struct PantographNode {
     goal_descriptions: Vec<String>,
 }
 
+impl PantographNode {
+    fn new(
+        goal_descriptions: Vec<String>,
+        tactics: Vec<String>,
+        state_id: u64,
+        length_penalty: f64,
+    ) -> Self {
+        let score = goal_descriptions.len();
+        let priority = ((score as f64 + length_penalty * tactics.len() as f64) * 1000.0) as u64;
+        Self { priority, score, state_id, tactics, goal_descriptions }
+    }
+}
+
 impl PartialEq for PantographNode {
-    fn eq(&self, other: &Self) -> bool { self.score == other.score }
+    fn eq(&self, other: &Self) -> bool { self.priority == other.priority }
 }
 impl Eq for PantographNode {}
 impl PartialOrd for PantographNode {
@@ -261,7 +288,7 @@ impl PartialOrd for PantographNode {
 }
 impl Ord for PantographNode {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        Reverse(self.score).cmp(&Reverse(other.score))
+        Reverse(self.priority).cmp(&Reverse(other.priority))
             .then_with(|| self.tactics.len().cmp(&other.tactics.len()))
     }
 }
@@ -302,14 +329,15 @@ pub fn pantograph_best_first_search(
     };
     seen_states.insert(initial_hash);
 
-    frontier.push(PantographNode {
-        score: 1, // one goal to prove
-        state_id: initial_state_id,
-        tactics: vec![],
-        goal_descriptions: vec![type_expr.to_string()],
-    });
+    frontier.push(PantographNode::new(
+        vec![type_expr.to_string()],
+        vec![],
+        initial_state_id,
+        config.length_penalty,
+    ));
 
     let mut best_partial = PantographNode {
+        priority: u64::MAX,
         score: usize::MAX,
         state_id: initial_state_id,
         tactics: vec![],
@@ -386,12 +414,12 @@ pub fn pantograph_best_first_search(
             let mut new_tactics = node.tactics.clone();
             new_tactics.push(tactic.clone());
 
-            frontier.push(PantographNode {
-                score: result.remaining_goals.len(),
-                state_id: new_state_id,
-                tactics: new_tactics,
-                goal_descriptions: result.remaining_goals,
-            });
+            frontier.push(PantographNode::new(
+                result.remaining_goals,
+                new_tactics,
+                new_state_id,
+                config.length_penalty,
+            ));
         }
     }
 

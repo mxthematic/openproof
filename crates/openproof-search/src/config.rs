@@ -16,6 +16,11 @@ pub struct TacticSearchConfig {
     pub dedup: bool,
     /// Maximum tactic sequence depth before pruning a branch.
     pub max_depth: usize,
+    /// Depth penalty factor for length-normalized scoring. The effective
+    /// priority is `remaining_goals + length_penalty * tactics.len()`, so
+    /// deeper branches are penalised slightly to avoid starving shallow
+    /// alternatives while still allowing deep exploration.
+    pub length_penalty: f64,
 }
 
 impl Default for TacticSearchConfig {
@@ -26,6 +31,7 @@ impl Default for TacticSearchConfig {
             timeout: Duration::from_secs(120),
             dedup: true,
             max_depth: 20,
+            length_penalty: 0.1,
         }
     }
 }

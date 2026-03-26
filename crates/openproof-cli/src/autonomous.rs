@@ -1044,10 +1044,10 @@ fn spawn_tactic_search_for_sorrys(
     // Standard tactics for the propose_fn callback
     let standard_tactics: Vec<String> = vec![
         "simp", "omega", "ring", "norm_num", "linarith", "aesop",
-        "decide", "trivial", "exact?", "apply?", "simp_all", "tauto",
-        "contradiction", "norm_cast", "positivity", "gcongr",
+        "grind", "decide", "trivial", "exact?", "apply?", "simp_all",
+        "tauto", "contradiction", "norm_cast", "positivity", "gcongr",
         "polyrith", "field_simp", "push_cast", "ring_nf", "nlinarith",
-        "norm_num [*]", "simp [*]",
+        "norm_num [*]", "simp [*]", "grind?",
     ].into_iter().map(String::from).collect();
 
     // Try Pantograph first (1000x faster), fall back to LSP

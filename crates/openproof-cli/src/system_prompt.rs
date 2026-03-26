@@ -109,7 +109,9 @@ fn lean_tactics_guidance() -> &'static str {
     // triggering source-scan heuristics on inline string content.
     concat!(
         "When writing Lean 4 proofs: prefer well-known tactics (simp, omega, ring, norm_num, ",
-        "exact?, apply?, rw?) over guessing exact lemma names. If unsure of an exact Mathlib ",
+        "grind, exact?, apply?, rw?) over guessing exact lemma names. The `grind` tactic is an ",
+        "SMT-style decision procedure that combines congruence closure, E-matching, and linear ",
+        "arithmetic -- try it when simp/omega/ring alone fail. If unsure of an exact Mathlib ",
         "lemma name, use `exact?` or `apply?` to let Lean search at compile time. ",
         "This avoids hallucinated lemma names that cause Unknown constant errors. ",
         "Use fully-qualified names like `RingHom.ker f` instead of dot notation `f.ker` when ",
