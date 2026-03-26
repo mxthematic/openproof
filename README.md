@@ -41,6 +41,13 @@ The autonomous proving loop combines **agentic reasoning** (LLM agents that writ
 uv tool install lean-lsp-mcp --python 3.12
 ```
 
+**Optional** (local prover model for dramatically stronger tactic search):
+
+```bash
+brew install ollama && ollama serve
+ollama pull hf.co/zeyu-zheng/BFS-Prover-V2-7B-GGUF:Q8_0
+```
+
 ### Install
 
 ```bash

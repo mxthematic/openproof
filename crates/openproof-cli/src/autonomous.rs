@@ -1041,7 +1041,7 @@ fn spawn_tactic_search_for_sorrys(
     let scratch_path = project_dir.join("Scratch.lean");
     let _ = std::fs::write(&scratch_path, &full_content);
 
-    // Standard tactics for the propose_fn callback
+    // Standard tactics for the propose_fn callback (used as fallback)
     let standard_tactics: Vec<String> = vec![
         "simp", "omega", "ring", "norm_num", "linarith", "aesop",
         "grind", "decide", "trivial", "exact?", "apply?", "simp_all",
@@ -1049,6 +1049,17 @@ fn spawn_tactic_search_for_sorrys(
         "polyrith", "field_simp", "push_cast", "ring_nf", "nlinarith",
         "norm_num [*]", "simp [*]", "grind?",
     ].into_iter().map(String::from).collect();
+
+    // Check if a prover model is available via ollama
+    let ollama_proposer = {
+        let proposer = openproof_search::ollama::OllamaProposer::new();
+        if proposer.is_available() {
+            eprintln!("[tactic-search] Prover model available via ollama");
+            Some(std::sync::Arc::new(proposer))
+        } else {
+            None
+        }
+    };
 
     // Try Pantograph first (1000x faster), fall back to LSP
     let pantograph: Option<Arc<Mutex<openproof_lean::pantograph::Pantograph>>> =
@@ -1098,22 +1109,41 @@ fn spawn_tactic_search_for_sorrys(
         let tactics = standard_tactics.clone();
         let store_for_propose = store.clone();
 
+        let ollama = ollama_proposer.clone();
         let propose_fn: openproof_search::search::ProposeFn = Box::new(
             move |goal: &str, _context: &str, k: usize| {
-                // Generate premise-based tactics from corpus search on the goal text
                 let mut candidates: Vec<String> = Vec::new();
-                if !goal.is_empty() {
+
+                // 1. Model-based tactics (if prover model available)
+                if let Some(ref proposer) = ollama {
+                    if let Ok(model_tactics) = proposer.propose_tactics(goal, k) {
+                        candidates.extend(model_tactics);
+                    }
+                }
+
+                // 2. Corpus-based tactics (premise retrieval)
+                if !goal.is_empty() && candidates.len() < k {
                     if let Ok(hits) = store_for_propose.search_verified_corpus(goal, 8) {
                         for (label, _statement, _vis) in &hits {
-                            // Generate premise-specific tactics
                             candidates.push(format!("exact {label}"));
                             candidates.push(format!("apply {label}"));
                             candidates.push(format!("rw [{label}]"));
                         }
                     }
                 }
-                // Append standard automation tactics after premise-based ones
-                candidates.extend(tactics.clone());
+
+                // 3. Standard automation tactics as fallback
+                let mut seen: std::collections::HashSet<String> =
+                    candidates.iter().cloned().collect();
+                for t in &tactics {
+                    if candidates.len() >= k {
+                        break;
+                    }
+                    if seen.insert(t.clone()) {
+                        candidates.push(t.clone());
+                    }
+                }
+
                 candidates.truncate(k);
                 Ok(candidates)
             },

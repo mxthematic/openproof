@@ -6,7 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
-use super::app::{SetupApp, Step, CORPUS_MODES, PROVIDERS};
+use super::app::{SetupApp, Step, CORPUS_MODES, PROVIDERS, PROVER_MODELS};
 
 pub fn draw(f: &mut Frame, app: &SetupApp) {
     let area = f.area();
@@ -23,6 +23,7 @@ pub fn draw(f: &mut Frame, app: &SetupApp) {
     match app.step {
         Step::Provider => draw_provider_step(f, app, chunks[1]),
         Step::Corpus => draw_corpus_step(f, app, chunks[1]),
+        Step::ProverModel => draw_prover_step(f, app, chunks[1]),
         Step::Finish => draw_finish(f, app, chunks[1]),
     }
     draw_footer(f, app, chunks[2]);
@@ -48,7 +49,8 @@ fn draw_footer(f: &mut Frame, app: &SetupApp, area: Rect) {
     let step_num = match app.step {
         Step::Provider => 1,
         Step::Corpus => 2,
-        Step::Finish => 3,
+        Step::ProverModel => 3,
+        Step::Finish => 4,
     };
     let hint = match app.step {
         Step::Finish => "Enter to start",
@@ -56,7 +58,7 @@ fn draw_footer(f: &mut Frame, app: &SetupApp, area: Rect) {
     };
     let footer = Paragraph::new(Line::from(vec![
         Span::styled(
-            format!("  Step {step_num}/2  "),
+            format!("  Step {step_num}/3  "),
             Style::default().fg(Color::DarkGray),
         ),
         Span::styled(hint, Style::default().fg(Color::DarkGray)),
@@ -153,11 +155,50 @@ fn draw_corpus_step(f: &mut Frame, app: &SetupApp, area: Rect) {
     f.render_widget(para, area);
 }
 
+fn draw_prover_step(f: &mut Frame, app: &SetupApp, area: Rect) {
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Prover Model",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "  A local model dramatically improves tactic search. Requires ollama.",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::styled(
+            "  Install: brew install ollama && ollama serve",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(""),
+    ];
+
+    for (i, (_, label)) in PROVER_MODELS.iter().enumerate() {
+        let selected = i == app.prover_selected;
+        let marker = if selected { "> " } else { "  " };
+        let style = if selected {
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        lines.push(Line::from(Span::styled(
+            format!("  {marker}{label}"),
+            style,
+        )));
+    }
+
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+    f.render_widget(para, area);
+}
+
 fn draw_finish(f: &mut Frame, app: &SetupApp, area: Rect) {
     let (_, provider_label, _) = PROVIDERS[app.provider_selected];
     let (corpus_id, corpus_label) = CORPUS_MODES[app.corpus_selected];
+    let (prover_id, prover_label) = PROVER_MODELS[app.prover_selected];
 
-    let lines = vec![
+    let mut lines = vec![
         Line::from(""),
         Line::from(Span::styled(
             "  Setup Complete",
@@ -174,24 +215,37 @@ fn draw_finish(f: &mut Frame, app: &SetupApp, area: Rect) {
             Span::styled("  Corpus:   ", Style::default().fg(Color::DarkGray)),
             Span::styled(corpus_label, Style::default().fg(Color::White)),
         ]),
+        Line::from(vec![
+            Span::styled("  Prover:   ", Style::default().fg(Color::DarkGray)),
+            Span::styled(prover_label, Style::default().fg(Color::White)),
+        ]),
         Line::from(""),
-        if corpus_id == "local" {
-            Line::from(Span::styled(
-                "  Mathlib will be auto-ingested on first launch.",
-                Style::default().fg(Color::DarkGray),
-            ))
-        } else {
-            Line::from(Span::styled(
-                "  Connected to OpenProof cloud.",
-                Style::default().fg(Color::DarkGray),
-            ))
-        },
-        Line::from(""),
-        Line::from(Span::styled(
-            "  Press Enter to start openproof.",
-            Style::default().fg(Color::Cyan),
-        )),
     ];
+
+    if prover_id != "none" {
+        lines.push(Line::from(Span::styled(
+            "  The model will be downloaded on first use via ollama.",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    if corpus_id == "local" {
+        lines.push(Line::from(Span::styled(
+            "  Mathlib will be auto-ingested on first launch.",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "  Connected to OpenProof cloud.",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  Press Enter to start openproof.",
+        Style::default().fg(Color::Cyan),
+    )));
 
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(para, area);

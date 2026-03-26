@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 pub enum Step {
     Provider,
     Corpus,
+    ProverModel,
     Finish,
 }
 
@@ -17,6 +18,9 @@ pub struct SetupResult {
     pub api_key: Option<String>,
     pub corpus_mode: String,
     pub corpus_url: Option<String>,
+    /// Local prover model for tactic search (e.g. "bfs-prover-v2-7b" or "none").
+    #[serde(default)]
+    pub prover_model: Option<String>,
 }
 
 pub struct SetupApp {
@@ -25,6 +29,7 @@ pub struct SetupApp {
     pub step: Step,
     pub provider_selected: usize,
     pub corpus_selected: usize,
+    pub prover_selected: usize,
     pub api_key_input: String,
     pub api_key_cursor: usize,
     pub entering_key: bool,
@@ -41,6 +46,11 @@ pub const CORPUS_MODES: &[(&str, &str)] = &[
     ("local", "Local only -- auto-imports Mathlib, no network"),
 ];
 
+pub const PROVER_MODELS: &[(&str, &str)] = &[
+    ("bfs-prover-v2-7b", "BFS-Prover-V2-7B (recommended, 5GB) -- much stronger tactic search"),
+    ("none", "None -- use standard tactics only (simp, omega, ring, grind, etc.)"),
+];
+
 impl SetupApp {
     pub fn new() -> Self {
         Self {
@@ -49,6 +59,7 @@ impl SetupApp {
             step: Step::Provider,
             provider_selected: 0,
             corpus_selected: 0,
+            prover_selected: 0,
             api_key_input: String::new(),
             api_key_cursor: 0,
             entering_key: false,
@@ -58,6 +69,7 @@ impl SetupApp {
     pub fn result(&self) -> SetupResult {
         let (provider_id, _, _) = PROVIDERS[self.provider_selected];
         let (corpus_id, _) = CORPUS_MODES[self.corpus_selected];
+        let (prover_id, _) = PROVER_MODELS[self.prover_selected];
         SetupResult {
             setup_complete: true,
             model_provider: provider_id.to_string(),
@@ -71,6 +83,11 @@ impl SetupApp {
                 Some("https://openproof-cloud-production.up.railway.app".to_string())
             } else {
                 None
+            },
+            prover_model: if prover_id == "none" {
+                None
+            } else {
+                Some(prover_id.to_string())
             },
         }
     }
@@ -92,7 +109,8 @@ impl SetupApp {
                     self.running = false;
                 }
                 Step::Corpus => self.step = Step::Provider,
-                Step::Finish => self.step = Step::Corpus,
+                Step::ProverModel => self.step = Step::Corpus,
+                Step::Finish => self.step = Step::ProverModel,
             }
             return;
         }
@@ -100,6 +118,7 @@ impl SetupApp {
         match self.step {
             Step::Provider => self.handle_provider_key(key),
             Step::Corpus => self.handle_corpus_key(key),
+            Step::ProverModel => self.handle_prover_key(key),
             Step::Finish => {
                 if key.code == KeyCode::Enter {
                     self.running = false;
@@ -168,6 +187,23 @@ impl SetupApp {
             KeyCode::Down => {
                 if self.corpus_selected + 1 < CORPUS_MODES.len() {
                     self.corpus_selected += 1;
+                }
+            }
+            KeyCode::Enter => {
+                self.step = Step::ProverModel;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_prover_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Up => {
+                self.prover_selected = self.prover_selected.saturating_sub(1);
+            }
+            KeyCode::Down => {
+                if self.prover_selected + 1 < PROVER_MODELS.len() {
+                    self.prover_selected += 1;
                 }
             }
             KeyCode::Enter => {

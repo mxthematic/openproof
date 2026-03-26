@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use openproof_lean::pantograph::Pantograph;
 use openproof_search::config::{SearchResult, TacticSearchConfig};
+use openproof_search::ollama::OllamaProposer;
 use openproof_search::search::{pantograph_best_first_search, ProposeFn};
 
 fn lean_project_dir() -> PathBuf {
@@ -174,6 +175,10 @@ fn minif2f_tactic_search_benchmark() {
         }
     }
 
+    // Check if ollama prover model is available
+    let ollama = OllamaProposer::new();
+    let use_model = ollama.is_available();
+
     println!("========================================");
     println!("MiniF2F Tactic Search Benchmark");
     println!("========================================");
@@ -181,7 +186,11 @@ fn minif2f_tactic_search_benchmark() {
     println!("Parse failures:  {}", parse_failures);
     println!("Lean version:    4.28.0");
     println!("Search config:   beam=8, expansions=200, timeout=120s, depth=20, penalty=0.1");
-    println!("Tactics:         standard automation only (no LLM, no corpus)");
+    if use_model {
+        println!("Tactics:         BFS-Prover-V2-7B via ollama + standard fallback");
+    } else {
+        println!("Tactics:         standard automation only (no model available)");
+    }
     println!("========================================\n");
 
     let config = TacticSearchConfig {
@@ -224,7 +233,14 @@ fn minif2f_tactic_search_benchmark() {
             pg = spawn_pg(&project_dir);
         }
 
-        let propose_fn = make_propose_fn(standard_tactics());
+        let propose_fn: ProposeFn = if use_model {
+            openproof_search::ollama::make_model_propose_fn(
+                OllamaProposer::new(),
+                standard_tactics(),
+            )
+        } else {
+            make_propose_fn(standard_tactics())
+        };
         let start = Instant::now();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             pantograph_best_first_search(&pg, &propose_fn, type_expr, "", &config)
