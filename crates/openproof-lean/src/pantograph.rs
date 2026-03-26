@@ -267,7 +267,19 @@ impl Pantograph {
             .and_then(|v| v.as_u64());
         let goals: Vec<String> = response.get("goals")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|g| g.as_str().map(String::from)).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|g| {
+                        // New format: goal is an object with target.pp field
+                        g.get("target")
+                            .and_then(|t| t.get("pp"))
+                            .and_then(|pp| pp.as_str())
+                            .map(String::from)
+                            // Old format: goal is a plain string
+                            .or_else(|| g.as_str().map(String::from))
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
 
         Ok(TacticTestResult {
