@@ -172,8 +172,23 @@ pub async fn run_agentic_loop(
                         arguments: call.arguments.clone(),
                     });
 
-                    // corpus_search is handled specially (needs store + async cloud client)
-                    let output = if call.name == "corpus_search" {
+                    // corpus_get/corpus_search handled specially (need store + async cloud)
+                    let output = if call.name == "corpus_get" {
+                        let label = serde_json::from_str::<serde_json::Value>(&call.arguments)
+                            .ok()
+                            .and_then(|v| v.get("label").and_then(|q| q.as_str()).map(str::to_string))
+                            .unwrap_or_default();
+                        match store.get_artifact_content(&label) {
+                            Ok(Some(code)) => ToolOutput {
+                                success: true,
+                                content: format!("Full proof code for `{label}`:\n```lean\n{code}\n```"),
+                            },
+                            _ => ToolOutput {
+                                success: false,
+                                content: format!("No artifact found for label `{label}`. Try corpus_search to find the correct name."),
+                            },
+                        }
+                    } else if call.name == "corpus_search" {
                         let query = serde_json::from_str::<serde_json::Value>(&call.arguments)
                             .ok()
                             .and_then(|v| v.get("query").and_then(|q| q.as_str()).map(str::to_string))
@@ -190,7 +205,7 @@ pub async fn run_agentic_loop(
                                     // The model can `exact <name>` (auto-imported via OpenProof.Corpus)
                                     // or copy the full proof into the workspace if the user wants it expanded.
                                     results.push(format!(
-                                        "*** VERIFIED PROOF (auto-imported) -- use `exact {label}` OR copy the full proof: ***\n- {label} :: {statement}\n```lean\n{proof_code}\n```"
+                                        "*** VERIFIED PROOF (auto-imported) -- use `exact {label}` directly, or call `corpus_get(label=\"{label}\")` to retrieve the full proof code: ***\n- {label} :: {statement}"
                                     ));
                                 } else {
                                     results.push(format!("- {label} :: {statement}"));
@@ -426,7 +441,22 @@ pub fn start_agent_branch_turn(
                         });
                     }
                     for call in &turn.tool_calls {
-                        let output = if call.name == "corpus_search" {
+                        let output = if call.name == "corpus_get" {
+                            let label = serde_json::from_str::<serde_json::Value>(&call.arguments)
+                                .ok()
+                                .and_then(|v| v.get("label").and_then(|q| q.as_str()).map(str::to_string))
+                                .unwrap_or_default();
+                            match store.get_artifact_content(&label) {
+                                Ok(Some(code)) => ToolOutput {
+                                    success: true,
+                                    content: format!("Full proof code for `{label}`:\n```lean\n{code}\n```"),
+                                },
+                                _ => ToolOutput {
+                                    success: false,
+                                    content: format!("No artifact found for `{label}`."),
+                                },
+                            }
+                        } else if call.name == "corpus_search" {
                             let query = serde_json::from_str::<serde_json::Value>(&call.arguments)
                                 .ok()
                                 .and_then(|v| v.get("query").and_then(|q| q.as_str()).map(str::to_string))

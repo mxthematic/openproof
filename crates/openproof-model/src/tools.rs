@@ -19,6 +19,7 @@ pub fn tool_definitions() -> Vec<Value> {
         file_patch_tool(),
         workspace_ls_tool(),
         corpus_search_tool(),
+        corpus_get_tool(),
         shell_run_tool(),
     ]
 }
@@ -238,6 +239,25 @@ fn corpus_search_tool() -> Value {
                 }
             },
             "required": ["query"],
+            "additionalProperties": false
+        }
+    })
+}
+
+fn corpus_get_tool() -> Value {
+    json!({
+        "type": "function",
+        "name": "corpus_get",
+        "description": "Retrieve the full proof code for a specific verified corpus item by label. Use this when you need to see or copy the complete proof body (e.g. when the user asks to write out the full formalization).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string",
+                    "description": "The exact label/name of the corpus item (e.g. 'two_irreducible_in_Zsqrtd_neg_five')"
+                }
+            },
+            "required": ["label"],
             "additionalProperties": false
         }
     })
