@@ -46,9 +46,23 @@ pub const CORPUS_MODES: &[(&str, &str)] = &[
     ("local", "Local only -- auto-imports Mathlib, no network"),
 ];
 
-pub const PROVER_MODELS: &[(&str, &str)] = &[
-    ("bfs-prover-v2-7b", "BFS-Prover-V2-7B (recommended, 5GB) -- much stronger tactic search"),
-    ("none", "None -- use standard tactics only (simp, omega, ring, grind, etc.)"),
+/// Prover model options: (config_id, display_label, ollama_tag_or_none)
+pub const PROVER_MODELS: &[(&str, &str, &str)] = &[
+    (
+        "bfs-prover-v2-7b-q4",
+        "BFS-Prover-V2-7B Q4 (recommended, ~5GB) -- fits 16GB RAM",
+        "hf.co/mradermacher/BFS-Prover-V2-7B-GGUF:Q4_K_M",
+    ),
+    (
+        "bfs-prover-v2-7b-q8",
+        "BFS-Prover-V2-7B Q8 (best quality, ~8GB) -- needs 32GB+ RAM",
+        "zeyu-zheng/BFS-Prover-V2-7B:q8_0",
+    ),
+    (
+        "none",
+        "None -- use standard tactics only (simp, omega, ring, grind, etc.)",
+        "",
+    ),
 ];
 
 impl SetupApp {
@@ -69,7 +83,7 @@ impl SetupApp {
     pub fn result(&self) -> SetupResult {
         let (provider_id, _, _) = PROVIDERS[self.provider_selected];
         let (corpus_id, _) = CORPUS_MODES[self.corpus_selected];
-        let (prover_id, _) = PROVER_MODELS[self.prover_selected];
+        let (prover_id, _, ollama_tag) = PROVER_MODELS[self.prover_selected];
         SetupResult {
             setup_complete: true,
             model_provider: provider_id.to_string(),
@@ -87,7 +101,8 @@ impl SetupApp {
             prover_model: if prover_id == "none" {
                 None
             } else {
-                Some(prover_id.to_string())
+                // Store the ollama model tag so the search pipeline can use it directly
+                Some(ollama_tag.to_string())
             },
         }
     }

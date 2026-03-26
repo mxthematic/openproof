@@ -175,7 +175,7 @@ fn draw_prover_step(f: &mut Frame, app: &SetupApp, area: Rect) {
         Line::from(""),
     ];
 
-    for (i, (_, label)) in PROVER_MODELS.iter().enumerate() {
+    for (i, (_, label, _)) in PROVER_MODELS.iter().enumerate() {
         let selected = i == app.prover_selected;
         let marker = if selected { "> " } else { "  " };
         let style = if selected {
@@ -196,7 +196,7 @@ fn draw_prover_step(f: &mut Frame, app: &SetupApp, area: Rect) {
 fn draw_finish(f: &mut Frame, app: &SetupApp, area: Rect) {
     let (_, provider_label, _) = PROVIDERS[app.provider_selected];
     let (corpus_id, corpus_label) = CORPUS_MODES[app.corpus_selected];
-    let (prover_id, prover_label) = PROVER_MODELS[app.prover_selected];
+    let (prover_id, prover_label, _) = PROVER_MODELS[app.prover_selected];
 
     let mut lines = vec![
         Line::from(""),

@@ -14,7 +14,7 @@ use serde::Deserialize;
 const DEFAULT_URL: &str = "http://localhost:11434";
 
 /// Default model name for tactic generation.
-const DEFAULT_MODEL: &str = "hf.co/zeyu-zheng/BFS-Prover-V2-7B-GGUF:Q8_0";
+const DEFAULT_MODEL: &str = "hf.co/mradermacher/BFS-Prover-V2-7B-GGUF:Q4_K_M";
 
 /// Max tokens per tactic (tactics are short).
 const MAX_TOKENS: u32 = 256;

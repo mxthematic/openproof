@@ -1050,9 +1050,20 @@ fn spawn_tactic_search_for_sorrys(
         "norm_num [*]", "simp [*]", "grind?",
     ].into_iter().map(String::from).collect();
 
-    // Check if a prover model is available via ollama
+    // Check if a prover model is configured and available via ollama
     let ollama_proposer = {
-        let proposer = openproof_search::ollama::OllamaProposer::new();
+        let proposer = if let Some(config) = crate::setup::load_config() {
+            if let Some(model_tag) = config.prover_model {
+                openproof_search::ollama::OllamaProposer::with_model(
+                    &model_tag,
+                    "http://localhost:11434",
+                )
+            } else {
+                openproof_search::ollama::OllamaProposer::new()
+            }
+        } else {
+            openproof_search::ollama::OllamaProposer::new()
+        };
         if proposer.is_available() {
             eprintln!("[tactic-search] Prover model available via ollama");
             Some(std::sync::Arc::new(proposer))
