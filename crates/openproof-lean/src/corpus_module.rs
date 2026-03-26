@@ -37,16 +37,17 @@ pub fn build_corpus_module(
         return Ok(0);
     }
 
-    // Build Corpus.lean content
-    let mut content = String::from("import Mathlib\n\nset_option maxHeartbeats 400000\n\n");
+    // Build Corpus.lean content, deduplicating by Lean declaration name.
+    // Composite artifacts (theorem + its helpers) may overlap with standalone entries.
+    let mut content = String::from("import Mathlib\n\n");
     let mut decl_count = 0usize;
+    let mut seen_decl_names = std::collections::HashSet::new();
 
     for decl in declarations {
         let code = decl.artifact_content.trim();
         if code.is_empty() {
             continue;
         }
-        // Strip import/open lines (we have our own imports at the top)
         let clean: String = code
             .lines()
             .filter(|l| {
@@ -59,8 +60,30 @@ pub fn build_corpus_module(
         if clean.is_empty() {
             continue;
         }
-        content.push_str(&format!("-- corpus: {} :: {}\n", decl.label, decl.statement));
-        content.push_str(clean);
+        // Check first declaration keyword
+        let first_word = clean.split_whitespace().next().unwrap_or("");
+        if !matches!(first_word, "theorem" | "lemma" | "def" | "noncomputable" | "instance" | "abbrev" | "set_option") {
+            continue;
+        }
+        // Split into individual declaration blocks and dedup each
+        let blocks: Vec<&str> = clean.split("\n\n").collect();
+        let mut new_blocks = Vec::new();
+        for block in &blocks {
+            let block = block.trim();
+            if block.is_empty() { continue; }
+            if let Some(name) = extract_decl_name(block) {
+                if seen_decl_names.contains(name) {
+                    continue;
+                }
+                seen_decl_names.insert(name.to_string());
+            }
+            new_blocks.push(block);
+        }
+        if new_blocks.is_empty() {
+            continue;
+        }
+        content.push_str(&format!("-- corpus: {}\n", decl.label));
+        content.push_str(&new_blocks.join("\n\n"));
         content.push_str("\n\n");
         decl_count += 1;
     }
@@ -108,6 +131,25 @@ pub fn build_corpus_module(
 
     eprintln!("[corpus-module] OpenProof.Corpus built ({decl_count} declarations)");
     Ok(decl_count)
+}
+
+/// Extract the declaration name from a Lean block (e.g. "theorem foo" -> "foo").
+fn extract_decl_name(block: &str) -> Option<&str> {
+    let first_line = block.lines().next()?;
+    let prefixes = [
+        "noncomputable def ",
+        "theorem ",
+        "lemma ",
+        "def ",
+        "instance ",
+        "abbrev ",
+    ];
+    for prefix in &prefixes {
+        if let Some(rest) = first_line.trim().strip_prefix(prefix) {
+            return rest.split(|c: char| !c.is_alphanumeric() && c != '_').next();
+        }
+    }
+    None
 }
 
 fn hash_str(s: &str) -> u64 {
