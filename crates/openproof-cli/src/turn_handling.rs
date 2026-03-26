@@ -189,9 +189,8 @@ pub async fn run_agentic_loop(
                                     // Show both: the quick `exact` option AND the full proof code.
                                     // The model can `exact <name>` (auto-imported via OpenProof.Corpus)
                                     // or copy the full proof into the workspace if the user wants it expanded.
-                                    let code_preview = if proof_code.len() > 2000 { &proof_code[..2000] } else { &proof_code };
                                     results.push(format!(
-                                        "*** VERIFIED PROOF (auto-imported) -- use `exact {label}` OR copy the full proof: ***\n- {label} :: {statement}\n```lean\n{code_preview}\n```"
+                                        "*** VERIFIED PROOF (auto-imported) -- use `exact {label}` OR copy the full proof: ***\n- {label} :: {statement}\n```lean\n{proof_code}\n```"
                                     ));
                                 } else {
                                     results.push(format!("- {label} :: {statement}"));
