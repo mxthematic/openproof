@@ -166,6 +166,9 @@ pub fn verify_scratch_via_lsp(
     project_dir: &Path,
     rendered_scratch: String,
 ) -> Result<LeanVerificationSummary> {
+    let project_dir = project_dir
+        .canonicalize()
+        .unwrap_or_else(|_| project_dir.to_path_buf());
     let scratch_path = project_dir.join("Scratch.lean");
     fs::write(&scratch_path, &rendered_scratch)
         .with_context(|| format!("writing {}", scratch_path.display()))?;
@@ -192,7 +195,10 @@ pub fn verify_scratch_via_lsp(
 
     let has_sorry = diagnostics.items.iter().any(|d| {
         let msg = d.message.to_ascii_lowercase();
-        msg.contains("uses 'sorry'") || msg.contains("uses sorry") || msg.contains("has sorry")
+        msg.contains("uses 'sorry'")
+            || msg.contains("uses `sorry`")
+            || msg.contains("uses sorry")
+            || msg.contains("has sorry")
     });
 
     let stderr = if !errors.is_empty() || !warnings.is_empty() {
