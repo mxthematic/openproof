@@ -1,5 +1,9 @@
-# Files to copy into git worktrees (gitignored files that sessions need)
+# Files to copy/link into git worktrees (gitignored files that sessions need)
 .env
 .env.local
 .openproof/
 CLAUDE.md
+
+# Lean build artifacts (symlink manually if not auto-linked: too large to copy)
+lean/.lake
+vendor

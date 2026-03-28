@@ -97,16 +97,21 @@ fn lean_check_tool() -> Value {
     json!({
         "type": "function",
         "name": "lean_check",
-        "description": "Run `#check <expr>` in Lean 4 to look up the type of an expression or find the exact name of a Mathlib lemma. Returns the type signature.",
+        "description": "Look up the type signature of one or more Lean 4 expressions. Accepts a single `expr` or a batch of `exprs` (preferred when checking multiple names). Batching is much faster than separate calls.",
         "parameters": {
             "type": "object",
             "properties": {
                 "expr": {
                     "type": "string",
-                    "description": "The Lean expression to check, e.g. 'Nat.Prime.dvd_mul' or '@List.map'"
+                    "description": "A single Lean expression to check, e.g. 'Nat.Prime.dvd_mul' or '@List.map'"
+                },
+                "exprs": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Multiple Lean expressions to check in one call, e.g. ['deriv_add', 'deriv_mul', 'deriv_const']. Preferred over repeated single-expr calls."
                 }
             },
-            "required": ["expr"],
+            "required": [],
             "additionalProperties": false
         }
     })

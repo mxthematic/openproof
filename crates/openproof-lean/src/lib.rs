@@ -19,4 +19,5 @@ pub use render::render_node_scratch;
 pub use tools::find_sorry_positions;
 pub use verify::{
     detect_lean_health, verify_active_node, verify_node, verify_node_at, verify_scratch_content,
+    verify_scratch_via_lsp,
 };

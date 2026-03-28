@@ -82,7 +82,7 @@ fn tools_and_workflow_section() -> &'static str {
         "`file_patch(path, patch)` (primary edit tool), `workspace_ls()`\n",
         "**Lean:** `lean_verify(file)`, `lean_goals(file)`, ",
         "`lean_screen_tactics(file, line, tactics)` (batch-test tactics without modifying file), ",
-        "`lean_check(expr)`, `lean_search_tactic(tactic, file, line)`\n",
+        "`lean_check(exprs)` (batch type lookup -- pass all names in one call), `lean_search_tactic(tactic, file, line)`\n",
         "**Research:** `corpus_search(query)` (190K+ Mathlib declarations), ",
         "`shell_run(command)` (sage, python3), web search\n\n",
 
@@ -97,6 +97,7 @@ fn tools_and_workflow_section() -> &'static str {
 
         "## Avoid\n",
         "- Repeated corpus_search without writing code\n",
+        "- Multiple separate lean_check calls (batch into one call with `exprs` array)\n",
         "- lean_check guessing random names (use exact?/apply? instead)\n",
         "- Explaining plans instead of executing them\n",
         "- shell_run for filesystem exploration (use workspace_ls)\n",

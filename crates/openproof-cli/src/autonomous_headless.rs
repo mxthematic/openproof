@@ -451,6 +451,7 @@ pub async fn run_autonomous(
                         &verify_session,
                         verify_session.proof.nodes.first().unwrap(),
                         persistent_path.as_deref(),
+                        None,
                     )
                 })
                 .await

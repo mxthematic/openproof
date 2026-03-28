@@ -473,7 +473,7 @@ impl AppState {
             "lean_verify" => "verifying proof...".to_string(),
             "lean_goals" => "extracting goals...".to_string(),
             "lean_screen_tactics" => "testing tactics...".to_string(),
-            "lean_check" => "checking type...".to_string(),
+            "lean_check" => "checking types...".to_string(),
             "lean_search_tactic" => "searching for tactic...".to_string(),
             "corpus_search" => "searching corpus...".to_string(),
             "file_write" => "writing file...".to_string(),

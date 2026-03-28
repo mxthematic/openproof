@@ -710,6 +710,7 @@ pub fn start_branch_verification(
                     })
                     .unwrap_or(&verification_clone.proof.nodes[0]),
                 scratch.as_deref(),
+                None,
             )
         })
         .await
