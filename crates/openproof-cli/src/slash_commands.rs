@@ -1,4 +1,4 @@
-//! Slash-command dispatch (`/help`, `/status`, `/autonomous`, etc.).
+//! Slash-command dispatch (`/help`, `/new`, `/autonomous`, etc.).
 //!
 //! All `/command` strings entered by the user flow through
 //! `apply_local_command`.  Each command arm is self-contained: it reads from
@@ -43,21 +43,15 @@ pub fn apply_local_command(
                 "Help",
                 [
                     "/help",
-                    "/status",
                     "/new <title>",
-                    "/clear [title]",
                     "/resume <session-id>",
                     "/nodes",
-                    "/branches",
-                    "/agents",
-                    "/tasks",
                     "/focus <branch-id|node-id|clear>",
                     "/agent spawn <role> <task>",
                     "/proof",
+                    "/lean",
                     "/paper",
-                    "/questions",
                     "/answer <option-id|text>",
-                    "/instructions",
                     "/memory",
                     "/remember <text>",
                     "/remember global <text>",
@@ -66,29 +60,15 @@ pub fn apply_local_command(
                     "/corpus status|search <query>|ingest|recluster",
                     "/sync status|enable|disable|drain",
                     "/export paper|tex|lean|all",
-                    "/autonomous status|start|stop|step",
+                    "/autonomous status|start|full|stop|step",
                     "/theorem <label> :: <statement>",
                     "/lemma <label> :: <statement>",
                     "/verify",
-                    "/login",
                     "/dashboard",
-                    "/sessions",
-                    "Tab focuses panes. Enter sends. q quits.",
+                    "Tab focuses panes. Enter sends. Ctrl+C quits.",
                 ]
                 .join("\n"),
             );
-        }
-        "/status" => {
-            emit_local_notice(tx, state, store, "Status", state.status_report());
-        }
-        "/branches" => {
-            emit_local_notice(tx, state, store, "Branches", state.branches_report());
-        }
-        "/agents" => {
-            emit_local_notice(tx, state, store, "Agents", state.agents_report());
-        }
-        "/tasks" => {
-            emit_local_notice(tx, state, store, "Tasks", state.tasks_report());
         }
         "/new" => {
             let write = state.create_session(if arg_text.is_empty() {
@@ -104,27 +84,6 @@ pub fn apply_local_command(
                 "Session",
                 format!(
                     "Started new session: {}.",
-                    state
-                        .current_session()
-                        .map(|session| session.title.clone())
-                        .unwrap_or_else(|| "OpenProof Rust Session".to_string())
-                ),
-            );
-        }
-        "/clear" => {
-            let write = state.create_session(if arg_text.is_empty() {
-                None
-            } else {
-                Some(arg_text)
-            });
-            persist_write(tx.clone(), store.clone(), write);
-            emit_local_notice(
-                tx,
-                state,
-                store,
-                "Session",
-                format!(
-                    "Cleared into new session: {}.",
                     state
                         .current_session()
                         .map(|session| session.title.clone())
@@ -322,24 +281,6 @@ pub fn apply_local_command(
                 emit_local_notice(tx, state, store, "Paper", "No active session.".to_string());
             }
         }
-        "/questions" => {
-            emit_local_notice(
-                tx,
-                state,
-                store,
-                "Questions",
-                state.pending_question_report(),
-            );
-        }
-        "/instructions" => {
-            let context = crate::system_prompt::load_prompt_context();
-            let content = if context.instructions.trim().is_empty() {
-                "No AGENTS.md instructions loaded.".to_string()
-            } else {
-                context.instructions
-            };
-            emit_local_notice(tx, state, store, "Instructions", content);
-        }
         "/memory" => {
             let context = crate::system_prompt::load_prompt_context();
             let content = if context.memory.trim().is_empty() {
@@ -420,15 +361,6 @@ pub fn apply_local_command(
         "/theorem" => apply_statement_command(tx, state, store, ProofNodeKind::Theorem, arg_text),
         "/lemma" => apply_statement_command(tx, state, store, ProofNodeKind::Lemma, arg_text),
         "/verify" => start_verify_active_node(tx, state, store),
-        "/login" => {
-            emit_local_notice(
-                tx,
-                state,
-                store,
-                "Login",
-                "Use `openproof login` from another shell to import the current Codex ChatGPT login.".to_string(),
-            );
-        }
         "/dashboard" => {
             let store_dash = store.clone();
             let tx_dash = tx.clone();
@@ -453,11 +385,6 @@ pub fn apply_local_command(
                         });
                     }
                 }
-            });
-        }
-        "/sessions" => {
-            state.overlay = Some(openproof_core::Overlay::SessionPicker {
-                selected: state.selected_session,
             });
         }
         _ => {

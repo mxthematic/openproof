@@ -3,21 +3,15 @@ use crate::state::AppState;
 /// All known slash commands for tab completion.
 pub const SLASH_COMMANDS: &[&str] = &[
     "help",
-    "status",
     "new",
-    "clear",
     "resume",
     "nodes",
-    "branches",
-    "agents",
-    "tasks",
     "focus",
     "agent spawn",
     "proof",
+    "lean",
     "paper",
-    "questions",
     "answer",
-    "instructions",
     "memory",
     "remember",
     "share",
@@ -35,14 +29,13 @@ pub const SLASH_COMMANDS: &[&str] = &[
     "export all",
     "autonomous status",
     "autonomous start",
+    "autonomous full",
     "autonomous stop",
     "autonomous step",
     "theorem",
     "lemma",
     "verify",
-    "login",
     "dashboard",
-    "sessions",
 ];
 
 /// Compute tab completions for the current command buffer.

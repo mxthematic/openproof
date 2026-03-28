@@ -113,10 +113,7 @@ Inside the interactive TUI, type `/` followed by a command.
 | Command | Description |
 |---------|-------------|
 | `/new <title>` | Start a new session |
-| `/clear [title]` | Create a new session (alias) |
-| `/resume <session-id>` | Switch to a different session |
-| `/sessions` | List all sessions |
-| `/status` | Current session status |
+| `/resume <session-id>` | Switch to a different session (no args opens picker) |
 
 ### Proving
 
@@ -126,8 +123,9 @@ Inside the interactive TUI, type `/` followed by a command.
 | `/lemma <label> :: <statement>` | Create a lemma node |
 | `/verify` | Trigger Lean verification manually |
 | `/proof` | Show proof state and node tree |
+| `/lean` | Inspect Lean state (scratch file, verification, history) |
 | `/focus <id\|clear>` | Focus on a specific branch or node |
-| `/autonomous start\|stop\|step\|status` | Control autonomous proving loop |
+| `/autonomous start\|full\|stop\|step\|status` | Control autonomous proving loop |
 | `/agent spawn <role> <task>` | Spawn a specific agent (planner, prover, repairer, retriever, critic) |
 
 ### Corpus and sync
@@ -146,12 +144,7 @@ Inside the interactive TUI, type `/` followed by a command.
 | Command | Description |
 |---------|-------------|
 | `/nodes` | List all proof nodes |
-| `/branches` | Show branch status |
-| `/agents` | Show agent status |
-| `/tasks` | Show task queue |
-| `/questions` | Show pending clarification questions |
 | `/answer <option\|text>` | Answer a pending question |
-| `/instructions` | Display AGENTS.md instructions |
 | `/memory` | Show workspace memory |
 | `/remember <text>` | Save to workspace memory |
 | `/remember global <text>` | Save to global memory |
@@ -163,7 +156,6 @@ Inside the interactive TUI, type `/` followed by a command.
 | `/paper` | Display compiled paper |
 | `/export paper\|tex\|lean\|all` | Export proof in various formats |
 | `/dashboard` | Open web dashboard |
-| `/login` | Sync auth credentials |
 
 ## Search strategies
 
