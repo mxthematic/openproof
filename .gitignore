@@ -8,6 +8,5 @@ lean/build/
 .openproof/
 .bun/
 target/
-CLAUDE.md
 benchmarks/miniF2F-lean4/
 vendor/
