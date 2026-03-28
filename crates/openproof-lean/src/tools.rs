@@ -76,6 +76,24 @@ fn tool_lean_verify(args: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
 
     let full_content = build_compilation_unit(&content, ctx);
 
+    // Fast path: LSP incremental verification (~200ms-2s vs 5-30s).
+    if let Some(ref lsp) = ctx.lsp_mcp {
+        if let Ok(result) =
+            crate::verify::verify_scratch_via_lsp(lsp, ctx.project_dir, full_content.clone())
+        {
+            let output = if result.ok {
+                result.stdout.clone()
+            } else {
+                result.stderr.clone()
+            };
+            return Ok(ToolOutput {
+                success: result.ok,
+                content: truncate_output(&output),
+            });
+        }
+    }
+
+    // Fallback: full Lean compiler invocation.
     let scratch_path = write_temp_file(&full_content)?;
     let (ok, output) = run_lean_command(ctx.project_dir, &scratch_path)?;
     let has_sorry = output.contains("declaration uses 'sorry'");

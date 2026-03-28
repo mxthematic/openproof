@@ -6,7 +6,9 @@ use openproof_protocol::{LeanHealth, LeanVerificationSummary, ProofNode, Session
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 
+use crate::lsp_mcp::LeanLspMcp;
 use crate::render::render_node_scratch;
 
 pub fn detect_lean_health(project_dir: &Path) -> Result<LeanHealth> {
@@ -70,16 +72,18 @@ pub fn verify_node(
     session: &SessionSnapshot,
     node: &ProofNode,
 ) -> Result<LeanVerificationSummary> {
-    verify_node_at(project_dir, session, node, None)
+    verify_node_at(project_dir, session, node, None, None)
 }
 
 /// Verify a node, optionally writing to a persistent scratch path.
 /// If `persistent_path` is Some, writes to that path instead of a temp file.
+/// If `lsp` is Some, tries the fast LSP path first.
 pub fn verify_node_at(
     project_dir: &Path,
     session: &SessionSnapshot,
     node: &ProofNode,
     persistent_path: Option<&Path>,
+    lsp: Option<&Mutex<LeanLspMcp>>,
 ) -> Result<LeanVerificationSummary> {
     if node.content.trim().is_empty() {
         return Ok(failed_result(
@@ -95,6 +99,15 @@ pub fn verify_node_at(
     }
 
     let rendered_scratch = render_node_scratch(session, node);
+
+    // Fast path: LSP incremental verification.
+    if let Some(lsp) = lsp {
+        if let Ok(result) = verify_scratch_via_lsp(lsp, project_dir, rendered_scratch.clone()) {
+            return Ok(result);
+        }
+    }
+
+    // Fallback: full Lean compiler invocation.
     let scratch_path = if let Some(path) = persistent_path {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -141,6 +154,72 @@ pub fn verify_scratch_content(
     let rendered = lines.join("\n");
     let scratch_path = write_temp_scratch(&rendered)?;
     verify_scratch(project_dir, rendered, scratch_path)
+}
+
+/// Verify via the LSP server (incremental elaboration, much faster after first call).
+///
+/// Writes `rendered_scratch` to `project_dir/Scratch.lean` and calls
+/// `LeanLspMcp.get_diagnostics()`. The LSP server keeps Mathlib loaded,
+/// so subsequent calls only re-elaborate the changed portions.
+pub fn verify_scratch_via_lsp(
+    lsp: &Mutex<LeanLspMcp>,
+    project_dir: &Path,
+    rendered_scratch: String,
+) -> Result<LeanVerificationSummary> {
+    let scratch_path = project_dir.join("Scratch.lean");
+    fs::write(&scratch_path, &rendered_scratch)
+        .with_context(|| format!("writing {}", scratch_path.display()))?;
+
+    let diagnostics = {
+        let mut client = lsp.lock().map_err(|e| anyhow::anyhow!("LSP lock: {e}"))?;
+        if !client.is_alive() {
+            anyhow::bail!("LSP server is not alive");
+        }
+        client.get_diagnostics(&scratch_path)?
+    };
+
+    let mut errors = Vec::new();
+    let mut warnings = Vec::new();
+    let mut infos = Vec::new();
+    for item in &diagnostics.items {
+        let line = format!("{}:{}: {}", item.line, item.column, item.message);
+        match item.severity.as_str() {
+            "error" => errors.push(line),
+            "warning" => warnings.push(line),
+            _ => infos.push(line),
+        }
+    }
+
+    let has_sorry = diagnostics.items.iter().any(|d| {
+        let msg = d.message.to_ascii_lowercase();
+        msg.contains("uses 'sorry'") || msg.contains("uses sorry") || msg.contains("has sorry")
+    });
+
+    let stderr = if !errors.is_empty() || !warnings.is_empty() {
+        [errors, warnings].concat().join("\n")
+    } else {
+        String::new()
+    };
+
+    Ok(LeanVerificationSummary {
+        ok: diagnostics.success && !has_sorry,
+        code: Some(if diagnostics.success && !has_sorry {
+            0
+        } else {
+            1
+        }),
+        stdout: infos.join("\n"),
+        stderr,
+        error: if has_sorry {
+            Some("sorry-placeholder".to_string())
+        } else {
+            None
+        },
+        checked_at: Utc::now().to_rfc3339(),
+        project_dir: project_dir.display().to_string(),
+        scratch_path: scratch_path.display().to_string(),
+        rendered_scratch,
+    })
 }
 
 pub(crate) fn verify_scratch(
