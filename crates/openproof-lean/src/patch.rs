@@ -28,7 +28,6 @@ struct Hunk {
     context_before: Vec<String>,
     removals: Vec<String>,
     additions: Vec<String>,
-    context_after: Vec<String>,
 }
 
 /// Extract a patch block from model output text.
@@ -63,7 +62,7 @@ pub fn apply_patch(original: &str, patch_text: &str) -> Option<PatchResult> {
 
     // Apply hunks in reverse order so line numbers don't shift
     for hunk in hunks.iter().rev() {
-        if let Some((start, end)) = find_hunk_location(&lines, hunk) {
+        if let Some((start, _)) = find_hunk_location(&lines, hunk) {
             // Build diff display
             for r in &hunk.removals {
                 diff_parts.push(format!("- {r}"));
@@ -140,7 +139,6 @@ fn parse_hunks(patch_text: &str) -> Option<Vec<Hunk>> {
                     context_before: context_before.clone(),
                     removals: removals.clone(),
                     additions: additions.clone(),
-                    context_after: Vec::new(),
                 });
                 context_before.clear();
                 removals.clear();
@@ -159,7 +157,6 @@ fn parse_hunks(patch_text: &str) -> Option<Vec<Hunk>> {
                     context_before: context_before.clone(),
                     removals: removals.clone(),
                     additions: additions.clone(),
-                    context_after: Vec::new(),
                 });
             }
             context_before.clear();
@@ -187,7 +184,6 @@ fn parse_hunks(patch_text: &str) -> Option<Vec<Hunk>> {
                     context_before: context_before.clone(),
                     removals: removals.clone(),
                     additions: additions.clone(),
-                    context_after: vec![ctx.to_string()],
                 });
                 context_before.clear();
                 context_before.push(ctx.to_string());
@@ -204,7 +200,6 @@ fn parse_hunks(patch_text: &str) -> Option<Vec<Hunk>> {
                     context_before: context_before.clone(),
                     removals: removals.clone(),
                     additions: additions.clone(),
-                    context_after: vec![trimmed.to_string()],
                 });
                 context_before.clear();
                 context_before.push(trimmed.to_string());
@@ -223,7 +218,6 @@ fn parse_hunks(patch_text: &str) -> Option<Vec<Hunk>> {
             context_before,
             removals,
             additions,
-            context_after: Vec::new(),
         });
     }
 

@@ -3,7 +3,7 @@
 //! Uses OpenAI text-embedding-3-small for embedding generation and
 //! Qdrant for vector storage and similarity search.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use qdrant_client::qdrant::{
     CreateCollectionBuilder, Distance, PointStruct, SearchPointsBuilder, UpsertPointsBuilder,
     VectorParamsBuilder,
@@ -13,7 +13,6 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::OnceCell;
 
 const COLLECTION_NAME: &str = "verified_corpus";
 const EMBEDDING_DIM: u64 = 1536; // text-embedding-3-small
@@ -39,7 +38,7 @@ pub struct EmbeddingStore {
 impl EmbeddingStore {
     /// Connect to a Qdrant instance. For local use, pass a path for on-disk storage.
     /// For cloud, pass a URL like "http://localhost:6334".
-    pub async fn open_local(storage_path: &Path) -> Result<Self> {
+    pub async fn open_local(_storage_path: &Path) -> Result<Self> {
         let client = Qdrant::from_url("http://localhost:6334")
             .build()
             .map_err(|e| anyhow::anyhow!("Qdrant connection failed: {e}"))?;
@@ -96,7 +95,7 @@ impl EmbeddingStore {
         statement: &str,
         decl_kind: &str,
         module_name: &str,
-        artifact_content: &str,
+        _artifact_content: &str,
         embedding: Vec<f32>,
     ) -> Result<()> {
         let mut payload = HashMap::new();

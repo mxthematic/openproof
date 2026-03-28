@@ -8,7 +8,6 @@
 //! Protocol: line-delimited JSON over stdin/stdout.
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -19,45 +18,6 @@ pub struct Pantograph {
     child: Child,
     stdin: std::process::ChildStdin,
     reader: BufReader<std::process::ChildStdout>,
-    project_dir: PathBuf,
-}
-
-#[derive(Debug, Deserialize)]
-struct PantographMessage {
-    pub severity: Option<String>,
-    pub data: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CompilationUnit {
-    pub boundary: (usize, usize),
-    pub messages: Vec<PantographMessage>,
-    pub new_constants: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FrontendProcessResult {
-    pub compilation_units: Option<Vec<CompilationUnit>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GoalStartResult {
-    #[serde(rename = "stateId")]
-    pub state_id: Option<u64>,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GoalTacticResult {
-    #[serde(rename = "stateId")]
-    pub state_id: Option<u64>,
-    #[serde(rename = "parseError")]
-    pub parse_error: Option<String>,
-    #[serde(rename = "tacticErrors")]
-    pub tactic_errors: Option<Vec<String>>,
-    pub goals: Option<Vec<String>>,
 }
 
 /// Result from verifying a Lean file via Pantograph.
@@ -115,7 +75,6 @@ impl Pantograph {
             child,
             stdin,
             reader,
-            project_dir: project_dir.to_path_buf(),
         })
     }
 
@@ -168,6 +127,7 @@ impl Pantograph {
         let response = self.send_command("frontend.process", json!({
             "file": content,
             "readHeader": true,
+            "inheritEnv": false,
             "newConstants": true,
         }))?;
 

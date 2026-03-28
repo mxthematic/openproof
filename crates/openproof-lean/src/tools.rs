@@ -843,6 +843,3 @@ fn tool_shell_run(args: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
     })
 }
 
-fn shell_escape(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
-}

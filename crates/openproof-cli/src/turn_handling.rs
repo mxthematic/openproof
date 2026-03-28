@@ -14,7 +14,7 @@ use openproof_core::{AppEvent, AppState, PendingWrite, SubmittedInput};
 use openproof_lean::lsp_mcp::LeanLspMcp;
 use openproof_lean::tools::{execute_tool, ToolContext, ToolOutput};
 use std::sync::{Arc, Mutex};
-use openproof_model::{run_codex_turn, 
+use openproof_model::{
     run_codex_turn_with_events, CodexTurnRequest, StreamEvent, TurnMessage,
 };
 use openproof_protocol::{AgentRole, AgentStatus, BranchQueueState, SessionSnapshot};
@@ -199,7 +199,7 @@ pub async fn run_agentic_loop(
                         let mut has_verified_proof = false;
                         if let Ok(local_hits) = store.search_verified_corpus(&query, 10) {
                             for (label, statement, _vis) in &local_hits {
-                                if let Ok(Some(proof_code)) = store.get_artifact_content(label) {
+                                if let Ok(Some(_)) = store.get_artifact_content(label) {
                                     has_verified_proof = true;
                                     // Show both: the quick `exact` option AND the full proof code.
                                     // The model can `exact <name>` (auto-imported via OpenProof.Corpus)
@@ -873,8 +873,6 @@ pub fn persist_verification_result(
 ) {
     tokio::spawn(async move {
         let store2 = store.clone();
-        let result2 = result.clone();
-        let session2 = session.clone();
         let outcome =
             tokio::task::spawn_blocking(move || {
                 let res = store.record_verification_result(&session, &result);

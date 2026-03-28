@@ -124,10 +124,6 @@ impl<B: Backend + Write> CustomTerminal<B> {
         &mut self.buffers[self.current]
     }
 
-    fn previous_buffer(&self) -> &Buffer {
-        &self.buffers[1 - self.current]
-    }
-
     fn previous_buffer_mut(&mut self) -> &mut Buffer {
         &mut self.buffers[1 - self.current]
     }
@@ -321,60 +317,6 @@ impl DrawCommand {
     fn is_put(&self) -> bool {
         matches!(self, Self::Put { .. })
     }
-}
-
-fn diff_buffers(a: &Buffer, b: &Buffer) -> Vec<DrawCommand> {
-    let previous_buffer = &a.content;
-    let next_buffer = &b.content;
-    let mut updates = vec![];
-    let mut last_nonblank_columns = vec![0u16; a.area.height as usize];
-
-    for y in 0..a.area.height {
-        let row_start = y as usize * a.area.width as usize;
-        let row_end = row_start + a.area.width as usize;
-        let row = &next_buffer[row_start..row_end];
-        let bg = row.last().map(|cell| cell.bg).unwrap_or(Color::Reset);
-
-        let mut last_nonblank_column = 0usize;
-        let mut column = 0usize;
-        while column < row.len() {
-            let cell = &row[column];
-            let width = display_width(cell.symbol());
-            if cell.symbol() != " " || cell.bg != bg || cell.modifier != Modifier::empty() {
-                last_nonblank_column = column + width.saturating_sub(1);
-            }
-            column += width.max(1);
-        }
-
-        if last_nonblank_column + 1 < row.len() {
-            let (x, y) = a.pos_of(row_start + last_nonblank_column + 1);
-            updates.push(DrawCommand::ClearToEnd { x, y, bg });
-        }
-        last_nonblank_columns[y as usize] = last_nonblank_column as u16;
-    }
-
-    let mut invalidated: usize = 0;
-    let mut to_skip: usize = 0;
-    for (i, (current, previous)) in next_buffer.iter().zip(previous_buffer.iter()).enumerate() {
-        if !current.skip && (current != previous || invalidated > 0) && to_skip == 0 {
-            let (x, y) = a.pos_of(i);
-            let row = i / a.area.width as usize;
-            if x <= last_nonblank_columns[row] {
-                updates.push(DrawCommand::Put {
-                    x,
-                    y,
-                    cell: next_buffer[i].clone(),
-                });
-            }
-        }
-        to_skip = display_width(current.symbol()).saturating_sub(1);
-        let affected_width = std::cmp::max(
-            display_width(current.symbol()),
-            display_width(previous.symbol()),
-        );
-        invalidated = std::cmp::max(affected_width, invalidated).saturating_sub(1);
-    }
-    updates
 }
 
 fn draw<I>(writer: &mut impl Write, commands: I) -> io::Result<()>

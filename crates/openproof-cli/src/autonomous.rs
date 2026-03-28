@@ -7,7 +7,7 @@
 //! `autonomous_headless.rs`.
 
 use crate::helpers::{
-    autonomous_stop_reason, autonomous_stop_reason_with_mode, best_hidden_branch,
+    autonomous_stop_reason_with_mode, best_hidden_branch,
     current_foreground_branch, persist_current_session, persist_write,
     should_promote_hidden_branch,
 };
@@ -17,7 +17,6 @@ use crate::turn_handling::{
 use anyhow::Result;
 use openproof_core::{AppEvent, AppState, AutonomousRunPatch};
 use openproof_lean::lsp_mcp::LeanLspMcp;
-use openproof_model::{run_codex_turn, CodexTurnRequest, TurnMessage};
 use openproof_protocol::{AgentRole, AgentStatus, BranchQueueState, SearchStrategy};
 use openproof_search::config::TacticSearchConfig;
 use openproof_search::search::best_first_search;
@@ -25,32 +24,6 @@ use openproof_store::AppStore;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
-
-/// Run a quick "research" model turn to gather relevant Mathlib lemmas and techniques.
-/// Returns the model's response text, to be included in the prover's context.
-async fn research_turn(target: &str, failed_summary: &str) -> Option<String> {
-    let prompt = format!(
-        "I need to prove the following in Lean 4 with Mathlib:\n{target}\n\n\
-         A previous approach failed:\n{failed_summary}\n\n\
-         List the 5 most relevant Mathlib lemma names (fully qualified) for this goal. \
-         For each, give the exact name and type signature. \
-         Also suggest 2-3 alternative proof strategies. \
-         Be concrete -- give actual Mathlib names, not guesses. Use #check if unsure."
-    );
-    let messages = vec![
-        TurnMessage::chat("system", "You are a Mathlib expert. Return ONLY concrete lemma names and type signatures. No prose."),
-        TurnMessage::chat("user", prompt),
-    ];
-    run_codex_turn(CodexTurnRequest {
-        session_id: "research",
-        messages: &messages,
-        model: "gpt-5.4",
-        reasoning_effort: "medium",
-        include_tools: false,
-    })
-    .await
-    .ok()
-}
 
 pub fn schedule_autonomous_tick(
     tx: mpsc::UnboundedSender<AppEvent>,

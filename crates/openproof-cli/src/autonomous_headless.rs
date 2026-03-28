@@ -6,7 +6,7 @@
 
 use crate::autonomous::{drain_until_settled, run_autonomous_step};
 use crate::helpers::{
-    autonomous_stop_reason, extract_lean_blocks_from_text, persist_write,
+    extract_lean_blocks_from_text, persist_write,
     resolve_lean_project_dir,
 };
 use crate::system_prompt::build_turn_messages_with_retrieval;

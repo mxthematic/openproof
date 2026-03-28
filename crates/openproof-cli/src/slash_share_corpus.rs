@@ -5,7 +5,7 @@ use crate::helpers::{
 };
 use openproof_core::{AppEvent, AppState};
 use openproof_store::AppStore;
-use std::{env, path::PathBuf, result::Result};
+use std::{path::PathBuf, result::Result};
 use tokio::sync::mpsc;
 
 pub fn cmd_share(

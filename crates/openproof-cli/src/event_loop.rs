@@ -14,7 +14,7 @@ use crate::turn_handling::{
     submit_selected_question_option,
 };
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use openproof_core::{AppEvent, AppState, FocusPane, PendingWrite};
+use openproof_core::{AppEvent, AppState, PendingWrite};
 use openproof_store::AppStore;
 use ratatui::backend::CrosstermBackend;
 use std::{io, io::Write as _, time::Duration};
