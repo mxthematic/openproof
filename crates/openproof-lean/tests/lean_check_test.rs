@@ -225,6 +225,120 @@ fn lsp_verify_incremental_is_fast() {
     );
 }
 
+// --- lean_eval LSP tests ---
+
+#[test]
+#[ignore] // Requires lean-lsp-mcp + Mathlib
+fn lsp_eval_computation() {
+    let lsp = spawn_lsp().expect("lean-lsp-mcp not available");
+    let workspace = std::env::temp_dir().join("openproof-test-eval");
+    let _ = std::fs::create_dir_all(&workspace);
+
+    let ctx = ToolContext {
+        project_dir: lean_project_dir(),
+        workspace_dir: &workspace,
+        imports: &[],
+        lsp_mcp: Some(lsp),
+        prover: None,
+    };
+
+    let start = Instant::now();
+    let result = execute_tool("lean_eval", r#"{"expr": "Nat.gcd 12 8"}"#, &ctx);
+    let elapsed = start.elapsed();
+
+    eprintln!(
+        "lsp_eval: success={}, elapsed={elapsed:?}, content={}",
+        result.success, result.content
+    );
+    assert!(result.success, "eval should succeed: {}", result.content);
+    assert!(
+        result.content.contains("4"),
+        "gcd(12,8) should be 4: {}",
+        result.content
+    );
+}
+
+// --- lean_search_tactic LSP tests ---
+
+#[test]
+#[ignore] // Requires lean-lsp-mcp + Mathlib
+fn lsp_search_tactic_exact() {
+    let lsp = spawn_lsp().expect("lean-lsp-mcp not available");
+    let workspace = std::env::temp_dir().join("openproof-test-search");
+    let _ = std::fs::create_dir_all(&workspace);
+
+    // Write a file with a sorry that exact? can solve
+    let lean_content = "import Mathlib\n\ntheorem trivial_rfl : 1 = 1 := by sorry\n";
+    std::fs::write(workspace.join("Scratch.lean"), lean_content).unwrap();
+
+    let ctx = ToolContext {
+        project_dir: lean_project_dir(),
+        workspace_dir: &workspace,
+        imports: &[],
+        lsp_mcp: Some(lsp),
+        prover: None,
+    };
+
+    let start = Instant::now();
+    let result = execute_tool(
+        "lean_search_tactic",
+        r#"{"tactic": "exact?", "file": "Scratch.lean", "line": 3}"#,
+        &ctx,
+    );
+    let elapsed = start.elapsed();
+
+    eprintln!(
+        "lsp_search_tactic: success={}, elapsed={elapsed:?}, content={}",
+        result.success, result.content
+    );
+    // exact? should find rfl or similar
+    assert!(
+        result.success,
+        "exact? should find a suggestion: {}",
+        result.content
+    );
+    assert!(
+        result.content.contains("rfl") || result.content.contains("exact"),
+        "should suggest rfl: {}",
+        result.content
+    );
+}
+
+// --- lean_verify via tool dispatch (e2e through execute_tool) ---
+
+#[test]
+#[ignore] // Requires lean-lsp-mcp + Mathlib
+fn lsp_verify_via_execute_tool() {
+    let lsp = spawn_lsp().expect("lean-lsp-mcp not available");
+    let workspace = std::env::temp_dir().join("openproof-test-verify-tool");
+    let _ = std::fs::create_dir_all(&workspace);
+
+    let lean_content = "import Mathlib\n\ntheorem e2e_test : 1 + 1 = 2 := by norm_num\n";
+    std::fs::write(workspace.join("Scratch.lean"), lean_content).unwrap();
+
+    let ctx = ToolContext {
+        project_dir: lean_project_dir(),
+        workspace_dir: &workspace,
+        imports: &[],
+        lsp_mcp: Some(lsp),
+        prover: None,
+    };
+
+    // Warmup
+    let _ = execute_tool("lean_verify", r#"{"file": "Scratch.lean"}"#, &ctx);
+
+    // Incremental
+    let start = Instant::now();
+    let result = execute_tool("lean_verify", r#"{"file": "Scratch.lean"}"#, &ctx);
+    let elapsed = start.elapsed();
+
+    eprintln!(
+        "lsp_verify_tool_e2e: success={}, elapsed={elapsed:?}, content={}",
+        result.success, result.content
+    );
+    assert!(result.success, "e2e verify should pass: {}", result.content);
+}
+
 #[test]
 fn lean_check_missing_args() {
     let ctx = ToolContext {

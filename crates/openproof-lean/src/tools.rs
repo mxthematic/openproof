@@ -501,6 +501,26 @@ fn tool_lean_eval_fn(args: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
 
     let imports = build_import_block(ctx.imports);
     let content = format!("{imports}\n#eval ({expr})\n");
+
+    // Fast path: LSP incremental verification.
+    if let Some(ref lsp) = ctx.lsp_mcp {
+        if let Ok(result) =
+            crate::verify::verify_scratch_via_lsp(lsp, ctx.project_dir, content.clone())
+        {
+            // #eval output appears as info-level diagnostics.
+            let output = if !result.stdout.is_empty() {
+                result.stdout
+            } else {
+                result.stderr
+            };
+            return Ok(ToolOutput {
+                success: !output.is_empty(),
+                content: truncate_output(&output),
+            });
+        }
+    }
+
+    // Fallback: full Lean compiler invocation.
     let scratch_path = write_temp_file(&content)?;
     let (ok, output) = run_lean_command(ctx.project_dir, &scratch_path)?;
     Ok(ToolOutput {
@@ -538,10 +558,49 @@ fn tool_lean_search_tactic(args: &Value, ctx: &ToolContext) -> Result<ToolOutput
         format!("{imports}\n{modified}")
     };
 
+    // Fast path: LSP incremental verification. "Try this:" appears in diagnostics.
+    if let Some(ref lsp) = ctx.lsp_mcp {
+        if let Ok(result) =
+            crate::verify::verify_scratch_via_lsp(lsp, ctx.project_dir, full_content.clone())
+        {
+            let output = format!("{}\n{}", result.stdout, result.stderr);
+            let suggestions = extract_search_suggestions(&output);
+            return if suggestions.is_empty() {
+                Ok(ToolOutput {
+                    success: false,
+                    content: truncate_output(&format!(
+                        "No suggestions found.\n\nFull output:\n{output}"
+                    )),
+                })
+            } else {
+                Ok(ToolOutput {
+                    success: true,
+                    content: truncate_output(&suggestions.join("\n")),
+                })
+            };
+        }
+    }
+
+    // Fallback: full Lean compiler invocation.
     let scratch_path = write_temp_file(&full_content)?;
     let (_ok, output) = run_lean_command(ctx.project_dir, &scratch_path)?;
 
-    // Extract just the suggestions from the output.
+    let suggestions = extract_search_suggestions(&output);
+    if suggestions.is_empty() {
+        Ok(ToolOutput {
+            success: false,
+            content: truncate_output(&format!("No suggestions found.\n\nFull output:\n{output}")),
+        })
+    } else {
+        Ok(ToolOutput {
+            success: true,
+            content: truncate_output(&suggestions.join("\n")),
+        })
+    }
+}
+
+/// Extract "Try this:" suggestions from Lean compiler or LSP diagnostic output.
+fn extract_search_suggestions(output: &str) -> Vec<String> {
     let mut suggestions = Vec::new();
     for line in output.lines() {
         let trimmed = line.trim();
@@ -555,19 +614,15 @@ fn tool_lean_search_tactic(args: &Value, ctx: &ToolContext) -> Result<ToolOutput
                 suggestions.push(trimmed[pos + 1..].trim().to_string());
             }
         }
+        // LSP diagnostics may include "Try this:" inside the message field
+        if let Some(idx) = trimmed.find("Try this:") {
+            let rest = trimmed[idx + 9..].trim();
+            if !rest.is_empty() && !suggestions.iter().any(|s| s == rest) {
+                suggestions.push(rest.to_string());
+            }
+        }
     }
-
-    if suggestions.is_empty() {
-        Ok(ToolOutput {
-            success: false,
-            content: truncate_output(&format!("No suggestions found.\n\nFull output:\n{output}")),
-        })
-    } else {
-        Ok(ToolOutput {
-            success: true,
-            content: truncate_output(&suggestions.join("\n")),
-        })
-    }
+    suggestions
 }
 
 fn tool_file_read(args: &Value, ctx: &ToolContext) -> Result<ToolOutput> {
