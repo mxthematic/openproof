@@ -1,12 +1,14 @@
 //! Web dashboard for OpenProof session inspection and management.
 
+mod editor_routes;
 mod manage;
 mod routes;
 mod tex;
+mod websocket;
 
 use anyhow::Result;
 use axum::{
-    routing::{get, post},
+    routing::{any, get, post},
     Router,
 };
 use openproof_store::AppStore;
@@ -18,6 +20,9 @@ const APP_JS: &str = include_str!("../static/app.js");
 const STYLES_CSS: &str = include_str!("../static/styles.css");
 const SESSIONS_JS: &str = include_str!("../static/sessions.js");
 const GRAPH_JS: &str = include_str!("../static/graph.js");
+
+// Editor dist directory is resolved at runtime relative to the executable.
+// Built by scripts/build-editor.sh -> static/editor-dist/
 
 #[derive(Clone)]
 pub(crate) struct DashboardState {
@@ -75,6 +80,23 @@ pub async fn start_dashboard_server(
         .route("/api/paper/tex", get(routes::paper_tex))
         .route("/api/paper/pdf", get(routes::paper_pdf))
         .route("/api/workspace", get(routes::workspace_files))
+        // Lean IDE editor routes.
+        .route("/editor", get(editor_routes::editor_page))
+        .route("/editor/assets/{*path}", get(editor_routes::editor_asset))
+        .route(
+            "/editor/infoview/{*path}",
+            get(editor_routes::editor_infoview_asset),
+        )
+        // Infoview iframe loads assets from /infoview/ (hardcoded in lean4monaco).
+        .route(
+            "/infoview/{*path}",
+            get(editor_routes::editor_infoview_asset),
+        )
+        .route(
+            "/api/editor/file",
+            get(editor_routes::read_file).post(editor_routes::write_file),
+        )
+        .route("/lean-ws", any(websocket::lean_ws_handler))
         .with_state(state);
 
     let primary_port = preferred_port.unwrap_or(4821);

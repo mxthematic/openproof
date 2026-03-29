@@ -195,7 +195,7 @@ function App() {
 
       <div className="main-area">
         <div className="tabs">
-          ${["overview", "graph", "code", "activity", "paper"].map((t) => h`
+          ${["overview", "graph", "ide", "activity", "paper"].map((t) => h`
             <button key=${t}
               className=${`tab ${tab === t ? "tab-active" : ""}`}
               onClick=${() => setTab(t)}>
@@ -207,7 +207,8 @@ function App() {
           ${!session ? h`<div className="empty">Select a session</div>`
             : tab === "overview" ? h`<${OverviewTab} session=${session} />`
             : tab === "graph" ? h`<${GraphTab} session=${session} />`
-            : tab === "code" ? h`<${CodeTab} sessionId=${selectedId} />`
+            : tab === "ide" ? h`<iframe src=${`/editor?id=${encodeURIComponent(selectedId)}`}
+                style=${{ width: "100%", height: "100%", border: "none" }} />`
             : tab === "activity" ? h`<${ActivityTab} session=${session} />`
             : h`<${PaperTab} sessionId=${selectedId} />`}
         </div>

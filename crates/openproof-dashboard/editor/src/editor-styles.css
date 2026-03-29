@@ -1,0 +1,129 @@
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: #0a0a0a;
+  color: #e5e5e5;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
+}
+
+.editor-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: #141414;
+  border-bottom: 1px solid #262626;
+  flex-shrink: 0;
+  height: 32px;
+}
+
+.editor-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #a3a3a3;
+}
+
+.editor-status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.editor-status--loading { color: #f59e0b; background: rgba(245,158,11,0.1); }
+.editor-status--ready { color: #22c55e; background: rgba(34,197,94,0.1); }
+.editor-status--error { color: #ef4444; background: rgba(239,68,68,0.1); }
+
+.editor-btn {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 4px 10px;
+  background: #262626;
+  color: #a3a3a3;
+  border: 1px solid #404040;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.editor-btn:hover { background: #333; color: #e5e5e5; }
+
+.editor-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.editor-sidebar {
+  width: 160px;
+  border-right: 1px solid #262626;
+  padding: 4px 0;
+  overflow-y: auto;
+  flex-shrink: 0;
+  background: #0f0f0f;
+}
+
+.editor-file-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 10px;
+  border: none;
+  cursor: pointer;
+  background: transparent;
+  color: #737373;
+  font-size: 12px;
+  font-family: "SF Mono", "Fira Code", monospace;
+  border-left: 2px solid transparent;
+}
+.editor-file-btn:hover { color: #e5e5e5; background: rgba(255,255,255,0.03); }
+.editor-file-btn--active {
+  color: #e5e5e5;
+  background: #1e293b;
+  border-left-color: #3b82f6;
+}
+
+.editor-panes {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.editor-left {
+  flex: 3;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.editor-right {
+  flex: 2;
+  min-width: 200px;
+  overflow: auto;
+  border-left: 1px solid #262626;
+  background: #0f0f0f;
+}
+
+/* Ensure infoview iframe fills the panel */
+.editor-right iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #1e1e1e;
+}
+
+/* Monaco theme overrides for dark mode */
+.monaco-editor { background: #0a0a0a !important; }
+.monaco-editor .margin { background: #0a0a0a !important; }
+
+/* Infoview text must be visible on dark background */
+.editor-right {
+  --vscode-editor-background: #1e1e1e;
+  --vscode-editor-foreground: #d4d4d4;
+  --vscode-foreground: #cccccc;
+  color: #d4d4d4;
+}
