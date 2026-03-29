@@ -132,7 +132,11 @@ body {
 .dot-pending { background: var(--muted); }
 .node-label { font-weight: 500; }
 .node-kind { color: var(--muted); font-size: 11px; font-family: var(--mono); }
+.node-score { font-family: var(--mono); font-size: 11px; font-weight: 600; min-width: 32px; }
+.node-children-info { font-size: 10px; color: var(--muted); font-family: var(--mono); }
+.node-search-info { font-size: 10px; color: var(--muted); font-family: var(--mono); width: 100%; padding-left: 14px; padding-top: 2px; }
 .node-statement { color: var(--muted); font-size: 11px; margin-left: auto; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-row { flex-wrap: wrap; }
 
 /* Branch details */
 .branch-card {
@@ -144,6 +148,19 @@ body {
 .branch-role { font-family: var(--mono); font-size: 11px; color: var(--accent); }
 .branch-title { font-weight: 500; }
 .branch-status { font-size: 11px; color: var(--muted); }
+.branch-attempts { font-size: 10px; color: var(--muted); font-family: var(--mono); }
+.branch-search-metrics {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--mono);
+  padding: 2px 0;
+}
+.branch-search-trend {
+  font-size: 10px;
+  color: var(--muted);
+  font-family: var(--mono);
+  padding: 1px 0;
+}
 .branch-snippet {
   margin-top: 4px;
   padding: 6px 8px;

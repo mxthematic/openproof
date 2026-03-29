@@ -258,8 +258,24 @@ pub struct ProofBranch {
     pub promoted_from_hidden: bool,
     pub superseded_by_branch_id: Option<String>,
     pub transcript: Vec<BranchMessage>,
+    /// History of BFS search attempts on this branch's focus node.
+    pub search_history: Vec<SearchAttemptMetrics>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// Metrics from a single BFS tactic search attempt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchAttemptMetrics {
+    /// Number of remaining unsolved goals after search.
+    pub remaining_goals: usize,
+    /// Number of tactic expansions tried.
+    pub expansions: usize,
+    /// Whether the search timed out (vs exhausted all candidates).
+    pub timed_out: bool,
+    /// Search outcome: "solved", "partial", "exhausted", "timeout".
+    pub outcome: String,
+    pub timestamp: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

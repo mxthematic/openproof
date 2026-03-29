@@ -255,7 +255,31 @@ impl AppState {
                 sorry_line,
                 solved,
                 tactics,
+                remaining_goals,
+                expansions,
+                search_outcome,
             } => {
+                // Store search metrics on the branch for decomposition scoring.
+                if let Some(session) = self.current_session_mut() {
+                    for branch in &mut session.proof.branches {
+                        if branch.focus_node_id.as_deref() == Some(&node_id) {
+                            branch
+                                .search_history
+                                .push(openproof_protocol::SearchAttemptMetrics {
+                                    remaining_goals: remaining_goals.unwrap_or(0),
+                                    expansions: expansions.unwrap_or(0),
+                                    timed_out: search_outcome == "timeout",
+                                    outcome: search_outcome.clone(),
+                                    timestamp: chrono::Utc::now().to_rfc3339(),
+                                });
+                            // Keep only last 10 entries to avoid unbounded growth.
+                            if branch.search_history.len() > 10 {
+                                branch.search_history.remove(0);
+                            }
+                            break;
+                        }
+                    }
+                }
                 // Add a transcript notice so agent branches see tactic search results
                 let notice = if solved && !tactics.is_empty() {
                     format!(

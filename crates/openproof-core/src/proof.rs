@@ -390,6 +390,7 @@ impl AppState {
                     content: format!("Started {} branch: {}", agent_role_label(role), title),
                     created_at: timestamp.clone(),
                 }],
+                search_history: vec![],
                 created_at: timestamp.clone(),
                 updated_at: timestamp.clone(),
             };

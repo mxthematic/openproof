@@ -129,6 +129,12 @@ pub enum AppEvent {
         sorry_line: usize,
         solved: bool,
         tactics: Vec<String>,
+        /// Number of remaining unsolved goals (None if solved).
+        remaining_goals: Option<usize>,
+        /// Number of tactic expansions tried.
+        expansions: Option<usize>,
+        /// Search outcome: "solved", "partial", "exhausted", "timeout".
+        search_outcome: String,
     },
     /// Progress update from tactic search.
     TacticSearchProgress {

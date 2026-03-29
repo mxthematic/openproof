@@ -1,0 +1,64 @@
+
+running 1 test
+========================================
+MiniF2F Tactic Search Benchmark
+========================================
+Problems parsed: 244
+Parse failures:  0
+Lean version:    4.28.0
+Search config:   beam=8, expansions=200, timeout=120s, depth=20, penalty=0.1
+Tactics:         standard automation only (no LLM, no corpus)
+========================================
+
+Spawning Pantograph (Mathlib load)...
+test minif2f_tactic_search_benchmark has been running for over 60 seconds
+Pantograph ready in 82.7s
+[  1/244] EXHAUST 4.95s  48 expansions -- aime_1983_p1
+[  2/244] SOLVED  0.42s  ["grind"] -- aime_1983_p2
+[  3/244] EXHAUST 0.63s  32 expansions -- aime_1983_p3
+[  4/244] EXHAUST 0.99s  64 expansions -- aime_1984_p1
+[  5/244] EXHAUST 10.76s  24 expansions -- aime_1984_p7
+[  6/244] EXHAUST 0.43s  48 expansions -- aime_1987_p5
+[  7/244] EXHAUST 8.33s  56 expansions -- aime_1988_p8
+[  8/244] SOLVED  0.29s  ["grind"] -- aime_1989_p8
+[  9/244] SOLVED  0.32s  ["grind"] -- aime_1990_p15
+[ 10/244] EXHAUST 1.73s  40 expansions -- aime_1990_p4
+[ 11/244] EXHAUST 0.69s  32 expansions -- aime_1991_p9
+[ 12/244] ERROR   0.01s  goal.start failed for: forall (f : ℤ → ℤ)
+  (h0 : f x + f (x-1) = x^2)
+  (h1 : f 19 = 94), f (94) % 1000 = 561 -- aime_1994_p3
+[ 13/244] EXHAUST 2.57s  40 expansions -- aime_1995_p7
+[ 14/244] EXHAUST 1.19s  48 expansions -- aime_1997_p9
+[ 15/244] ERROR   0.01s  goal.start failed for: forall (m : ℚ)
+  (h₀ : 0 < m)
+  (h₁ : ∑ k ∈ Finset.Icc (1 : ℕ) 35, Real.sin (5 * k * π  -- aime_1999_p11
+[ 16/244] SOLVED  0.12s  ["grind"] -- algebra_2varlineareq_fp3zeq11_3tfm1m5zeqn68_feqn10_zeq7
+[ 17/244] EXHAUST 1.65s  48 expansions -- algebra_9onxpypzleqsum2onxpy
+[ 18/244] EXHAUST 2.53s  48 expansions -- algebra_abpbcpcageq3_sumaonsqrtapbgeq3onsqrt2
+[ 19/244] EXHAUST 0.85s  40 expansions -- algebra_absapbon1pabsapbleqsumabsaon1pabsa
+[ 20/244] SOLVED  0.19s  ["grind"] -- algebra_absxm1pabsxpabsxp1eqxp2_0leqxleq1
+[ 21/244] EXHAUST 1.02s  24 expansions -- algebra_amgm_sum1toneqn_prod1tonleq1
+[ 22/244] EXHAUST 1.83s  48 expansions -- algebra_amgm_sumasqdivbgeqsuma
+[ 23/244] EXHAUST 5.09s  40 expansions -- algebra_apbmpcneq0_aeq0anbeq0anceq0
+[ 24/244] EXHAUST 2.01s  64 expansions -- algebra_apbon2pownleqapownpbpowon2
+[ 25/244] EXHAUST 3.70s  56 expansions -- algebra_apbpceq2_abpbcpcaeq1_aleq1on3anbleq1ancleq4on3
+[ 26/244] EXHAUST 9.84s  160 expansions -- algebra_bleqa_apbon2msqrtableqambsqon8b
+[ 27/244] EXHAUST 1.10s  48 expansions -- algebra_cubrtrp1oncubrtreq3_rcubp1onrcubeq5778
+[ 28/244] EXHAUST 0.34s  24 expansions -- algebra_ineq_nto1onlt2m1on
+[ 29/244] EXHAUST 0.15s  16 expansions -- algebra_others_exirrpowirrrat
+[ 30/244] EXHAUST 0.59s  56 expansions -- algebra_sqineq_at2malt1
+[ 31/244] EXHAUST 0.32s  24 expansions -- algebra_sqineq_unitcircatbpabsamblt1
+[ 32/244] EXHAUST 0.39s  40 expansions -- algebra_sqineq_unitcircatbpamblt1
+[ 33/244] EXHAUST 0.24s  16 expansions -- algebra_sum1onsqrt2to1onsqrt10000lt198
+[ 34/244] EXHAUST 0.85s  32 expansions -- amc12_2000_p1
+[ 35/244] EXHAUST 0.61s  40 expansions -- amc12_2000_p12
+[ 36/244] SOLVED  0.57s  ["grind"] -- amc12_2000_p20
+[ 37/244] EXHAUST 1.10s  32 expansions -- amc12_2000_p6
+[ 38/244] EXHAUST 1.06s  32 expansions -- amc12_2001_p21
+[ 39/244] ERROR   0.00s  goal.start failed for: Finset.prod (Finset.filter (λ x => ¬ Even x) (Finset.range 10000)) (id : ℕ → ℕ) = (10000!) / -- amc12_2001_p5
+[ 40/244] EXHAUST 1.15s  32 expansions -- amc12a_2002_p13
+[ 41/244] EXHAUST 0.66s  32 expansions -- amc12a_2002_p6
+[ 42/244] PANIC   0.00s  search panicked -- amc12a_2003_p23
+Spawning Pantograph (Mathlib load)...
+Pantograph ready in 102.8s
+[ 43/244] EXHAUST 1.98s  32 expansions -- amc12a_2003_p5

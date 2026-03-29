@@ -1,0 +1,524 @@
+
+running 1 test
+========================================
+MiniF2F Tactic Search Benchmark
+========================================
+Problems parsed: 244
+Parse failures:  0
+Lean version:    4.28.0
+Search config:   beam=8, expansions=200, timeout=120s, depth=20, penalty=0.1
+Tactics:         standard automation only (no LLM, no corpus)
+========================================
+
+Spawning Pantograph (Mathlib load)...
+test minif2f_tactic_search_benchmark has been running for over 60 seconds
+Pantograph ready in 87.7s
+[  1/244] SOLVED  0.29s  ["simp"] -- aime_1983_p1
+[  2/244] SOLVED  0.08s  ["simp"] -- aime_1983_p2
+[  3/244] SOLVED  0.19s  ["ring"] -- aime_1983_p3
+[  4/244] SOLVED  0.03s  ["simp"] -- aime_1984_p1
+[  5/244] SOLVED  0.06s  ["ring"] -- aime_1984_p7
+[  6/244] SOLVED  0.05s  ["ring"] -- aime_1987_p5
+[  7/244] SOLVED  0.39s  ["simp"] -- aime_1988_p8
+[  8/244] SOLVED  0.09s  ["ring"] -- aime_1989_p8
+[  9/244] SOLVED  0.09s  ["ring"] -- aime_1990_p15
+[ 10/244] SOLVED  0.08s  ["simp"] -- aime_1990_p4
+[ 11/244] SOLVED  0.03s  ["simp"] -- aime_1991_p9
+[ 12/244] ERROR   0.01s  goal.start failed for: forall (f : ℤ → ℤ)
+  (h0 : f x + f (x-1) = x^2)
+  (h1 : f 19 = 94), f (94) % 1000 = 561 -- aime_1994_p3
+[ 13/244] SOLVED  0.14s  ["simp"] -- aime_1995_p7
+[ 14/244] SOLVED  0.06s  ["simp"] -- aime_1997_p9
+[ 15/244] ERROR   0.00s  goal.start failed for: forall (m : ℚ)
+  (h₀ : 0 < m)
+  (h₁ : ∑ k ∈ Finset.Icc (1 : ℕ) 35, Real.sin (5 * k * π  -- aime_1999_p11
+[ 16/244] SOLVED  0.04s  ["ring"] -- algebra_2varlineareq_fp3zeq11_3tfm1m5zeqn68_feqn10_zeq7
+[ 17/244] SOLVED  0.10s  ["simp"] -- algebra_9onxpypzleqsum2onxpy
+[ 18/244] SOLVED  0.12s  ["simp"] -- algebra_abpbcpcageq3_sumaonsqrtapbgeq3onsqrt2
+[ 19/244] SOLVED  0.03s  ["ring"] -- algebra_absapbon1pabsapbleqsumabsaon1pabsa
+[ 20/244] SOLVED  0.04s  ["ring"] -- algebra_absxm1pabsxpabsxp1eqxp2_0leqxleq1
+[ 21/244] SOLVED  0.06s  ["ring"] -- algebra_amgm_sum1toneqn_prod1tonleq1
+[ 22/244] SOLVED  0.16s  ["simp"] -- algebra_amgm_sumasqdivbgeqsuma
+[ 23/244] SOLVED  0.13s  ["simp"] -- algebra_apbmpcneq0_aeq0anbeq0anceq0
+[ 24/244] SOLVED  0.08s  ["simp"] -- algebra_apbon2pownleqapownpbpowon2
+[ 25/244] SOLVED  0.12s  ["simp"] -- algebra_apbpceq2_abpbcpcaeq1_aleq1on3anbleq1ancleq4on3
+[ 26/244] SOLVED  0.11s  ["simp"] -- algebra_bleqa_apbon2msqrtableqambsqon8b
+[ 27/244] SOLVED  0.02s  ["simp"] -- algebra_cubrtrp1oncubrtreq3_rcubp1onrcubeq5778
+[ 28/244] SOLVED  0.01s  ["simp"] -- algebra_ineq_nto1onlt2m1on
+[ 29/244] SOLVED  0.01s  ["simp"] -- algebra_others_exirrpowirrrat
+[ 30/244] SOLVED  0.02s  ["ring"] -- algebra_sqineq_at2malt1
+[ 31/244] SOLVED  0.03s  ["ring"] -- algebra_sqineq_unitcircatbpabsamblt1
+[ 32/244] SOLVED  0.03s  ["ring"] -- algebra_sqineq_unitcircatbpamblt1
+[ 33/244] SOLVED  0.01s  ["simp"] -- algebra_sum1onsqrt2to1onsqrt10000lt198
+[ 34/244] SOLVED  0.05s  ["simp"] -- amc12_2000_p1
+[ 35/244] SOLVED  0.04s  ["ring"] -- amc12_2000_p12
+[ 36/244] SOLVED  0.13s  ["simp"] -- amc12_2000_p20
+[ 37/244] SOLVED  0.07s  ["simp"] -- amc12_2000_p6
+[ 38/244] SOLVED  0.06s  ["ring"] -- amc12_2001_p21
+[ 39/244] ERROR   0.00s  goal.start failed for: Finset.prod (Finset.filter (λ x => ¬ Even x) (Finset.range 10000)) (id : ℕ → ℕ) = (10000!) / -- amc12_2001_p5
+[ 40/244] SOLVED  0.06s  ["simp"] -- amc12a_2002_p13
+[ 41/244] SOLVED  0.03s  ["simp"] -- amc12a_2002_p6
+[ 42/244] PANIC   0.00s  search panicked -- amc12a_2003_p23
+Spawning Pantograph (Mathlib load)...
+Pantograph ready in 70.5s
+[ 43/244] SOLVED  0.11s  ["simp"] -- amc12a_2003_p5
+[ 44/244] SOLVED  0.08s  ["simp"] -- amc12a_2008_p25
+[ 45/244] SOLVED  0.02s  ["simp"] -- amc12a_2009_p6
+[ 46/244] SOLVED  0.12s  ["ring"] -- amc12a_2009_p7
+[ 47/244] SOLVED  0.04s  ["ring"] -- amc12a_2013_p4
+[ 48/244] SOLVED  0.05s  ["simp"] -- amc12a_2019_p12
+[ 49/244] SOLVED  0.03s  ["ring"] -- amc12a_2020_p10
+[ 50/244] SOLVED  0.08s  ["ring"] -- amc12a_2020_p15
+[ 51/244] SOLVED  0.08s  ["simp"] -- amc12a_2020_p25
+[ 52/244] SOLVED  0.10s  ["ring"] -- amc12a_2020_p4
+[ 53/244] SOLVED  0.07s  ["simp"] -- amc12a_2020_p7
+[ 54/244] SOLVED  0.05s  ["ring"] -- amc12a_2020_p9
+[ 55/244] SOLVED  0.09s  ["ring"] -- amc12a_2021_p12
+[ 56/244] SOLVED  0.07s  ["ring"] -- amc12a_2021_p14
+[ 57/244] SOLVED  0.17s  ["simp"] -- amc12a_2021_p18
+[ 58/244] SOLVED  0.06s  ["ring"] -- amc12a_2021_p19
+[ 59/244] SOLVED  0.09s  ["simp"] -- amc12a_2021_p22
+[ 60/244] SOLVED  0.31s  ["simp"] -- amc12a_2021_p25
+[ 61/244] SOLVED  0.99s  ["omega"] -- amc12a_2021_p3
+[ 62/244] SOLVED  0.17s  ["simp"] -- amc12a_2021_p8
+[ 63/244] SOLVED  0.03s  ["simp"] -- amc12a_2021_p9
+[ 64/244] SOLVED  0.11s  ["simp"] -- amc12b_2002_p19
+[ 65/244] SOLVED  0.01s  ["simp"] -- amc12b_2002_p2
+[ 66/244] SOLVED  0.03s  ["simp"] -- amc12b_2002_p4
+[ 67/244] SOLVED  0.12s  ["simp"] -- amc12b_2002_p7
+[ 68/244] SOLVED  0.14s  ["ring"] -- amc12b_2020_p13
+[ 69/244] SOLVED  0.06s  ["ring"] -- amc12b_2020_p2
+[ 70/244] SOLVED  0.12s  ["simp"] -- amc12b_2020_p21
+[ 71/244] SOLVED  0.06s  ["simp"] -- amc12b_2020_p22
+[ 72/244] ERROR   0.00s  goal.start failed for: forall (n : ℕ)
+  (h₀ : 9 ≤ n), ∃ (x : ℕ), (x : ℝ)^2 = (Nat.factorial (n + 2) - Nat.facto -- amc12b_2020_p6
+[ 73/244] SOLVED  0.04s  ["simp"] -- amc12b_2021_p1
+[ 74/244] SOLVED  0.07s  ["ring"] -- amc12b_2021_p13
+[ 75/244] SOLVED  0.15s  ["ring"] -- amc12b_2021_p18
+[ 76/244] SOLVED  0.01s  ["simp"] -- amc12b_2021_p3
+[ 77/244] SOLVED  0.07s  ["simp"] -- amc12b_2021_p4
+[ 78/244] SOLVED  0.08s  ["ring"] -- amc12b_2021_p9
+[ 79/244] SOLVED  0.05s  ["ring"] -- imo_1959_p1
+[ 80/244] SOLVED  0.08s  ["simp"] -- imo_1960_p2
+[ 81/244] SOLVED  0.07s  ["simp"] -- imo_1962_p2
+[ 82/244] ERROR   0.01s  goal.start failed for: Real.cos (π / 7) - Real.cos (2 * π / 7) + Real.cos (3 * π / 7) = 1 / 2 -- imo_1963_p5
+[ 83/244] SOLVED  0.16s  ["simp"] -- imo_1964_p2
+[ 84/244] SOLVED  0.44s  ["simp"] -- imo_1965_p2
+[ 85/244] SOLVED  0.06s  ["simp"] -- imo_1968_p5_1
+[ 86/244] PANIC   0.00s  search panicked -- imo_1969_p2
+Spawning Pantograph (Mathlib load)...
+Pantograph ready in 61.0s
+[ 87/244] SOLVED  0.16s  ["ring"] -- imo_1974_p3
+[ 88/244] SOLVED  0.08s  ["ring"] -- imo_1977_p6
+[ 89/244] SOLVED  0.10s  ["ring"] -- imo_1981_p6
+[ 90/244] SOLVED  0.32s  ["simp"] -- imo_1982_p1
+[ 91/244] SOLVED  0.16s  ["simp"] -- imo_1983_p6
+[ 92/244] SOLVED  0.35s  ["simp"] -- imo_1984_p6
+[ 93/244] SOLVED  0.09s  ["simp"] -- imo_1985_p6
+[ 94/244] SOLVED  0.11s  ["simp"] -- imo_1992_p1
+[ 95/244] SOLVED  0.05s  ["simp"] -- imo_1997_p5
+[ 96/244] SOLVED  0.24s  ["simp"] -- imo_2001_p6
+[ 97/244] SOLVED  0.03s  ["ring"] -- imo_2019_p1
+[ 98/244] SOLVED  0.19s  ["ring"] -- imosl_2007_algebra_p6
+[ 99/244] SOLVED  0.07s  ["ring"] -- induction_11div10tonmn1ton
+[100/244] SOLVED  0.03s  ["simp"] -- induction_12dvd4expnp1p20
+[101/244] SOLVED  0.04s  ["ring"] -- induction_1pxpownlt1pnx
+[102/244] ERROR   0.00s  goal.start failed for: forall (n : ℕ)
+  (h₀ : 3 ≤ n), (n)! < n^(n - 1) -- induction_nfactltnexpnm1ngt3
+[103/244] SOLVED  0.03s  ["simp"] -- induction_pord1p1on2powklt5on2
+[104/244] SOLVED  0.02s  ["ring"] -- induction_pprime_pdvdapowpma
+[105/244] SOLVED  0.04s  ["simp"] -- induction_prod1p1onk3le3m1onn
+[106/244] SOLVED  0.02s  ["ring"] -- induction_sumkexp3eqsumksq
+[107/244] SOLVED  0.04s  ["ring"] -- mathd_algebra_107
+[108/244] SOLVED  0.03s  ["simp"] -- mathd_algebra_113
+[109/244] SOLVED  0.01s  ["simp"] -- mathd_algebra_114
+[110/244] SOLVED  0.05s  ["simp"] -- mathd_algebra_125
+[111/244] SOLVED  0.02s  ["simp"] -- mathd_algebra_129
+[112/244] SOLVED  0.03s  ["ring"] -- mathd_algebra_137
+[113/244] SOLVED  0.09s  ["simp"] -- mathd_algebra_139
+[114/244] SOLVED  0.03s  ["ring"] -- mathd_algebra_141
+[115/244] SOLVED  0.03s  ["simp"] -- mathd_algebra_142
+[116/244] SOLVED  0.03s  ["ring"] -- mathd_algebra_143
+[117/244] SOLVED  0.03s  ["ring"] -- mathd_algebra_148
+[118/244] SOLVED  0.01s  ["simp"] -- mathd_algebra_153
+[119/244] SOLVED  0.06s  ["ring"] -- mathd_algebra_156
+[120/244] SOLVED  0.09s  ["simp"] -- mathd_algebra_158
+[121/244] SOLVED  0.04s  ["ring"] -- mathd_algebra_160
+[122/244] SOLVED  0.03s  ["ring"] -- mathd_algebra_17
+[123/244] SOLVED  0.03s  ["simp"] -- mathd_algebra_170
+[124/244] SOLVED  0.02s  ["ring"] -- mathd_algebra_171
+[125/244] SOLVED  0.02s  ["ring"] -- mathd_algebra_176
+[126/244] SOLVED  0.11s  ["simp"] -- mathd_algebra_184
+[127/244] SOLVED  0.03s  ["simp"] -- mathd_algebra_188
+[128/244] SOLVED  0.03s  ["ring"] -- mathd_algebra_196
+[129/244] SOLVED  0.01s  ["simp"] -- mathd_algebra_208
+[130/244] SOLVED  0.05s  ["simp"] -- mathd_algebra_209
+[131/244] SOLVED  0.03s  ["ring"] -- mathd_algebra_215
+[132/244] SOLVED  0.02s  ["ring"] -- mathd_algebra_24
+[133/244] SOLVED  0.04s  ["ring"] -- mathd_algebra_246
+[134/244] SOLVED  0.03s  ["ring"] -- mathd_algebra_263
+[135/244] SOLVED  0.04s  ["simp"] -- mathd_algebra_270
+[136/244] SOLVED  0.02s  ["simp"] -- mathd_algebra_275
+[137/244] SOLVED  0.05s  ["ring"] -- mathd_algebra_276
+[138/244] SOLVED  0.14s  ["simp"] -- mathd_algebra_288
+[139/244] SOLVED  0.19s  ["simp"] -- mathd_algebra_289
+[140/244] SOLVED  0.04s  ["simp"] -- mathd_algebra_293
+[141/244] SOLVED  0.01s  ["simp"] -- mathd_algebra_296
+[142/244] SOLVED  0.01s  ["simp"] -- mathd_algebra_302
+[143/244] SOLVED  0.00s  ["simp"] -- mathd_algebra_304
+[144/244] SOLVED  0.03s  ["simp"] -- mathd_algebra_313
+[145/244] SOLVED  0.01s  ["simp"] -- mathd_algebra_314
+[146/244] SOLVED  0.15s  ["simp"] -- mathd_algebra_320
+[147/244] SOLVED  0.03s  ["ring"] -- mathd_algebra_329
+[148/244] SOLVED  0.05s  ["simp"] -- mathd_algebra_33
+[149/244] SOLVED  0.07s  ["ring"] -- mathd_algebra_332
+[150/244] SOLVED  0.05s  ["ring"] -- mathd_algebra_338
+[151/244] SOLVED  0.05s  ["ring"] -- mathd_algebra_342
+[152/244] SOLVED  0.04s  ["ring"] -- mathd_algebra_346
+[153/244] SOLVED  0.05s  ["ring"] -- mathd_algebra_354
+[154/244] SOLVED  0.02s  ["ring"] -- mathd_algebra_359
+[155/244] SOLVED  0.05s  ["ring"] -- mathd_algebra_362
+[156/244] SOLVED  0.04s  ["simp"] -- mathd_algebra_388
+[157/244] SOLVED  0.10s  ["ring"] -- mathd_algebra_392
+[158/244] SOLVED  0.13s  ["simp"] -- mathd_algebra_398
+[159/244] SOLVED  0.02s  ["ring"] -- mathd_algebra_400
+[160/244] SOLVED  0.03s  ["ring"] -- mathd_algebra_412
+[161/244] SOLVED  0.02s  ["simp"] -- mathd_algebra_419
+[162/244] SOLVED  0.05s  ["ring"] -- mathd_algebra_427
+[163/244] SOLVED  0.02s  ["ring"] -- mathd_algebra_432
+[164/244] SOLVED  0.03s  ["ring"] -- mathd_algebra_44
+[165/244] SOLVED  0.03s  ["ring"] -- mathd_algebra_440
+[166/244] SOLVED  0.03s  ["simp"] -- mathd_algebra_441
+[167/244] SOLVED  0.07s  ["ring"] -- mathd_algebra_452
+[168/244] SOLVED  0.06s  ["ring"] -- mathd_algebra_459
+[169/244] SOLVED  0.12s  ["simp"] -- mathd_algebra_478
+[170/244] SOLVED  0.02s  ["ring"] -- mathd_algebra_484
+[171/244] SOLVED  0.09s  ["simp"] -- mathd_algebra_487
+[172/244] SOLVED  0.03s  ["ring"] -- mathd_algebra_513
+[173/244] SOLVED  0.06s  ["ring"] -- mathd_algebra_598
+[174/244] SOLVED  0.03s  ["ring"] -- mathd_algebra_756
+[175/244] SOLVED  0.10s  ["ring"] -- mathd_algebra_76
+[176/244] SOLVED  0.03s  ["simp"] -- mathd_algebra_80
+[177/244] SOLVED  0.03s  ["ring"] -- mathd_numbertheory_100
+[178/244] SOLVED  0.04s  ["simp"] -- mathd_numbertheory_1124
+[179/244] SOLVED  0.03s  ["ring"] -- mathd_numbertheory_12
+[180/244] SOLVED  0.03s  ["ring"] -- mathd_numbertheory_127
+[181/244] SOLVED  0.20s  ["simp"] -- mathd_numbertheory_135
+[182/244] SOLVED  0.02s  ["ring"] -- mathd_numbertheory_150
+[183/244] SOLVED  2.52s  ["omega"] -- mathd_numbertheory_175
+[184/244] SOLVED  0.04s  ["omega"] -- mathd_numbertheory_185
+[185/244] SOLVED  0.01s  ["simp"] -- mathd_numbertheory_207
+[186/244] SOLVED  0.01s  ["simp"] -- mathd_numbertheory_212
+[187/244] SOLVED  0.03s  ["ring"] -- mathd_numbertheory_222
+[188/244] SOLVED  0.06s  ["ring"] -- mathd_numbertheory_227
+[189/244] SOLVED  0.00s  ["simp"] -- mathd_numbertheory_229
+[190/244] SOLVED  0.02s  ["simp"] -- mathd_numbertheory_233
+[191/244] SOLVED  0.05s  ["simp"] -- mathd_numbertheory_234
+[192/244] SOLVED  0.00s  ["simp"] -- mathd_numbertheory_235
+[193/244] SOLVED  0.01s  ["ring"] -- mathd_numbertheory_237
+[194/244] SOLVED  0.04s  ["ring"] -- mathd_numbertheory_239
+[195/244] SOLVED  0.05s  ["omega"] -- mathd_numbertheory_247
+[196/244] SOLVED  0.00s  ["simp"] -- mathd_numbertheory_254
+[197/244] SOLVED  0.02s  ["ring"] -- mathd_numbertheory_277
+[198/244] SOLVED  0.04s  ["simp"] -- mathd_numbertheory_293
+[199/244] SOLVED  0.03s  ["simp"] -- mathd_numbertheory_296
+[200/244] SOLVED  0.01s  ["simp"] -- mathd_numbertheory_299
+[201/244] SOLVED  0.01s  ["ring"] -- mathd_numbertheory_3
+[202/244] SOLVED  0.05s  ["simp"] -- mathd_numbertheory_314
+[203/244] SOLVED  0.03s  ["omega"] -- mathd_numbertheory_320
+[204/244] SOLVED  0.00s  ["simp"] -- mathd_numbertheory_321
+[205/244] SOLVED  0.02s  ["omega"] -- mathd_numbertheory_328
+[206/244] SOLVED  0.03s  ["omega"] -- mathd_numbertheory_34
+[207/244] SOLVED  0.07s  ["simp"] -- mathd_numbertheory_341
+[208/244] SOLVED  0.00s  ["simp"] -- mathd_numbertheory_342
+[209/244] SOLVED  0.01s  ["ring"] -- mathd_numbertheory_343
+[210/244] SOLVED  0.01s  ["simp"] -- mathd_numbertheory_345
+[211/244] SOLVED  0.01s  ["simp"] -- mathd_numbertheory_353
+[212/244] SOLVED  0.01s  ["simp"] -- mathd_numbertheory_427
+[213/244] SOLVED  0.14s  ["simp"] -- mathd_numbertheory_430
+[214/244] SOLVED  0.15s  ["ring"] -- mathd_numbertheory_435
+[215/244] SOLVED  0.03s  ["ring"] -- mathd_numbertheory_447
+[216/244] SOLVED  0.04s  ["ring"] -- mathd_numbertheory_451
+[217/244] ERROR   0.00s  goal.start failed for: forall (n : ℕ)
+  (h₀ : 0 < n)
+  (h₁ : 80325∣(n !)), 17 ≤ n -- mathd_numbertheory_457
+[218/244] SOLVED  0.04s  ["ring"] -- mathd_numbertheory_483
+[219/244] SOLVED  0.05s  ["simp"] -- mathd_numbertheory_495
+[220/244] SOLVED  0.03s  ["simp"] -- mathd_numbertheory_5
+[221/244] SOLVED  0.00s  ["simp"] -- mathd_numbertheory_517
+[222/244] SOLVED  0.07s  ["ring"] -- mathd_numbertheory_521
+[223/244] SOLVED  0.04s  ["ring"] -- mathd_numbertheory_541
+[224/244] SOLVED  0.00s  ["simp"] -- mathd_numbertheory_551
+[225/244] SOLVED  0.08s  ["ring"] -- mathd_numbertheory_552
+[226/244] SOLVED  0.05s  ["omega"] -- mathd_numbertheory_559
+[227/244] SOLVED  0.04s  ["omega"] -- mathd_numbertheory_582
+[228/244] SOLVED  0.05s  ["ring"] -- mathd_numbertheory_618
+[229/244] SOLVED  0.00s  ["simp"] -- mathd_numbertheory_66
+[230/244] SOLVED  0.05s  ["simp"] -- mathd_numbertheory_711
+[231/244] SOLVED  0.01s  ["simp"] -- mathd_numbertheory_728
+[232/244] SOLVED  0.25s  ["ring"] -- mathd_numbertheory_764
+[233/244] SOLVED  0.04s  ["omega"] -- mathd_numbertheory_765
+[234/244] SOLVED  0.01s  ["simp"] -- mathd_numbertheory_769
+[235/244] SOLVED  0.01s  ["simp"] -- mathd_numbertheory_85
+[236/244] SOLVED  0.05s  ["omega"] -- mathd_numbertheory_99
+[237/244] SOLVED  0.03s  ["ring"] -- numbertheory_2pownm1prime_nprime
+[238/244] SOLVED  0.05s  ["ring"] -- numbertheory_3pow2pownm1mod2pownp3eq2pownp2
+[239/244] SOLVED  0.01s  ["simp"] -- numbertheory_4x3m7y3neq2003
+[240/244] SOLVED  0.09s  ["simp"] -- numbertheory_aoddbdiv4asqpbsqmod8eq1
+[241/244] SOLVED  0.08s  ["simp"] -- numbertheory_exk2powkeqapb2mulbpa2_aeq1
+[242/244] SOLVED  0.08s  ["simp"] -- numbertheory_fxeq4powxp6powxp9powx_f2powmdvdf2pown
+[243/244] SOLVED  0.05s  ["simp"] -- numbertheory_notEquiv2i2jasqbsqdiv8
+[244/244] SOLVED  0.01s  ["simp"] -- numbertheory_x5neqy2p4
+
+========================================
+RESULTS
+========================================
+Total:    244
+Solved:   235 (96.3%)
+Failed:   0
+Errors:   9
+Wall time: 237.6s
+Avg time:  0.08s/problem
+
+--- Solved Problems ---
+  0.29s  aime_1983_p1  ["simp"]
+  0.08s  aime_1983_p2  ["simp"]
+  0.19s  aime_1983_p3  ["ring"]
+  0.03s  aime_1984_p1  ["simp"]
+  0.06s  aime_1984_p7  ["ring"]
+  0.05s  aime_1987_p5  ["ring"]
+  0.39s  aime_1988_p8  ["simp"]
+  0.09s  aime_1989_p8  ["ring"]
+  0.09s  aime_1990_p15  ["ring"]
+  0.08s  aime_1990_p4  ["simp"]
+  0.03s  aime_1991_p9  ["simp"]
+  0.14s  aime_1995_p7  ["simp"]
+  0.06s  aime_1997_p9  ["simp"]
+  0.04s  algebra_2varlineareq_fp3zeq11_3tfm1m5zeqn68_feqn10_zeq7  ["ring"]
+  0.10s  algebra_9onxpypzleqsum2onxpy  ["simp"]
+  0.12s  algebra_abpbcpcageq3_sumaonsqrtapbgeq3onsqrt2  ["simp"]
+  0.03s  algebra_absapbon1pabsapbleqsumabsaon1pabsa  ["ring"]
+  0.04s  algebra_absxm1pabsxpabsxp1eqxp2_0leqxleq1  ["ring"]
+  0.06s  algebra_amgm_sum1toneqn_prod1tonleq1  ["ring"]
+  0.16s  algebra_amgm_sumasqdivbgeqsuma  ["simp"]
+  0.13s  algebra_apbmpcneq0_aeq0anbeq0anceq0  ["simp"]
+  0.08s  algebra_apbon2pownleqapownpbpowon2  ["simp"]
+  0.12s  algebra_apbpceq2_abpbcpcaeq1_aleq1on3anbleq1ancleq4on3  ["simp"]
+  0.11s  algebra_bleqa_apbon2msqrtableqambsqon8b  ["simp"]
+  0.02s  algebra_cubrtrp1oncubrtreq3_rcubp1onrcubeq5778  ["simp"]
+  0.01s  algebra_ineq_nto1onlt2m1on  ["simp"]
+  0.01s  algebra_others_exirrpowirrrat  ["simp"]
+  0.02s  algebra_sqineq_at2malt1  ["ring"]
+  0.03s  algebra_sqineq_unitcircatbpabsamblt1  ["ring"]
+  0.03s  algebra_sqineq_unitcircatbpamblt1  ["ring"]
+  0.01s  algebra_sum1onsqrt2to1onsqrt10000lt198  ["simp"]
+  0.05s  amc12_2000_p1  ["simp"]
+  0.04s  amc12_2000_p12  ["ring"]
+  0.13s  amc12_2000_p20  ["simp"]
+  0.07s  amc12_2000_p6  ["simp"]
+  0.06s  amc12_2001_p21  ["ring"]
+  0.06s  amc12a_2002_p13  ["simp"]
+  0.03s  amc12a_2002_p6  ["simp"]
+  0.11s  amc12a_2003_p5  ["simp"]
+  0.08s  amc12a_2008_p25  ["simp"]
+  0.02s  amc12a_2009_p6  ["simp"]
+  0.12s  amc12a_2009_p7  ["ring"]
+  0.04s  amc12a_2013_p4  ["ring"]
+  0.05s  amc12a_2019_p12  ["simp"]
+  0.03s  amc12a_2020_p10  ["ring"]
+  0.08s  amc12a_2020_p15  ["ring"]
+  0.08s  amc12a_2020_p25  ["simp"]
+  0.10s  amc12a_2020_p4  ["ring"]
+  0.07s  amc12a_2020_p7  ["simp"]
+  0.05s  amc12a_2020_p9  ["ring"]
+  0.09s  amc12a_2021_p12  ["ring"]
+  0.07s  amc12a_2021_p14  ["ring"]
+  0.17s  amc12a_2021_p18  ["simp"]
+  0.06s  amc12a_2021_p19  ["ring"]
+  0.09s  amc12a_2021_p22  ["simp"]
+  0.31s  amc12a_2021_p25  ["simp"]
+  0.99s  amc12a_2021_p3  ["omega"]
+  0.17s  amc12a_2021_p8  ["simp"]
+  0.03s  amc12a_2021_p9  ["simp"]
+  0.11s  amc12b_2002_p19  ["simp"]
+  0.01s  amc12b_2002_p2  ["simp"]
+  0.03s  amc12b_2002_p4  ["simp"]
+  0.12s  amc12b_2002_p7  ["simp"]
+  0.14s  amc12b_2020_p13  ["ring"]
+  0.06s  amc12b_2020_p2  ["ring"]
+  0.12s  amc12b_2020_p21  ["simp"]
+  0.06s  amc12b_2020_p22  ["simp"]
+  0.04s  amc12b_2021_p1  ["simp"]
+  0.07s  amc12b_2021_p13  ["ring"]
+  0.15s  amc12b_2021_p18  ["ring"]
+  0.01s  amc12b_2021_p3  ["simp"]
+  0.07s  amc12b_2021_p4  ["simp"]
+  0.08s  amc12b_2021_p9  ["ring"]
+  0.05s  imo_1959_p1  ["ring"]
+  0.08s  imo_1960_p2  ["simp"]
+  0.07s  imo_1962_p2  ["simp"]
+  0.16s  imo_1964_p2  ["simp"]
+  0.44s  imo_1965_p2  ["simp"]
+  0.06s  imo_1968_p5_1  ["simp"]
+  0.16s  imo_1974_p3  ["ring"]
+  0.08s  imo_1977_p6  ["ring"]
+  0.10s  imo_1981_p6  ["ring"]
+  0.32s  imo_1982_p1  ["simp"]
+  0.16s  imo_1983_p6  ["simp"]
+  0.35s  imo_1984_p6  ["simp"]
+  0.09s  imo_1985_p6  ["simp"]
+  0.11s  imo_1992_p1  ["simp"]
+  0.05s  imo_1997_p5  ["simp"]
+  0.24s  imo_2001_p6  ["simp"]
+  0.03s  imo_2019_p1  ["ring"]
+  0.19s  imosl_2007_algebra_p6  ["ring"]
+  0.07s  induction_11div10tonmn1ton  ["ring"]
+  0.03s  induction_12dvd4expnp1p20  ["simp"]
+  0.04s  induction_1pxpownlt1pnx  ["ring"]
+  0.03s  induction_pord1p1on2powklt5on2  ["simp"]
+  0.02s  induction_pprime_pdvdapowpma  ["ring"]
+  0.04s  induction_prod1p1onk3le3m1onn  ["simp"]
+  0.02s  induction_sumkexp3eqsumksq  ["ring"]
+  0.04s  mathd_algebra_107  ["ring"]
+  0.03s  mathd_algebra_113  ["simp"]
+  0.01s  mathd_algebra_114  ["simp"]
+  0.05s  mathd_algebra_125  ["simp"]
+  0.02s  mathd_algebra_129  ["simp"]
+  0.03s  mathd_algebra_137  ["ring"]
+  0.09s  mathd_algebra_139  ["simp"]
+  0.03s  mathd_algebra_141  ["ring"]
+  0.03s  mathd_algebra_142  ["simp"]
+  0.03s  mathd_algebra_143  ["ring"]
+  0.03s  mathd_algebra_148  ["ring"]
+  0.01s  mathd_algebra_153  ["simp"]
+  0.06s  mathd_algebra_156  ["ring"]
+  0.09s  mathd_algebra_158  ["simp"]
+  0.04s  mathd_algebra_160  ["ring"]
+  0.03s  mathd_algebra_17  ["ring"]
+  0.03s  mathd_algebra_170  ["simp"]
+  0.02s  mathd_algebra_171  ["ring"]
+  0.02s  mathd_algebra_176  ["ring"]
+  0.11s  mathd_algebra_184  ["simp"]
+  0.03s  mathd_algebra_188  ["simp"]
+  0.03s  mathd_algebra_196  ["ring"]
+  0.01s  mathd_algebra_208  ["simp"]
+  0.05s  mathd_algebra_209  ["simp"]
+  0.03s  mathd_algebra_215  ["ring"]
+  0.02s  mathd_algebra_24  ["ring"]
+  0.04s  mathd_algebra_246  ["ring"]
+  0.03s  mathd_algebra_263  ["ring"]
+  0.04s  mathd_algebra_270  ["simp"]
+  0.02s  mathd_algebra_275  ["simp"]
+  0.05s  mathd_algebra_276  ["ring"]
+  0.14s  mathd_algebra_288  ["simp"]
+  0.19s  mathd_algebra_289  ["simp"]
+  0.04s  mathd_algebra_293  ["simp"]
+  0.01s  mathd_algebra_296  ["simp"]
+  0.01s  mathd_algebra_302  ["simp"]
+  0.00s  mathd_algebra_304  ["simp"]
+  0.03s  mathd_algebra_313  ["simp"]
+  0.01s  mathd_algebra_314  ["simp"]
+  0.15s  mathd_algebra_320  ["simp"]
+  0.03s  mathd_algebra_329  ["ring"]
+  0.05s  mathd_algebra_33  ["simp"]
+  0.07s  mathd_algebra_332  ["ring"]
+  0.05s  mathd_algebra_338  ["ring"]
+  0.05s  mathd_algebra_342  ["ring"]
+  0.04s  mathd_algebra_346  ["ring"]
+  0.05s  mathd_algebra_354  ["ring"]
+  0.02s  mathd_algebra_359  ["ring"]
+  0.05s  mathd_algebra_362  ["ring"]
+  0.04s  mathd_algebra_388  ["simp"]
+  0.10s  mathd_algebra_392  ["ring"]
+  0.13s  mathd_algebra_398  ["simp"]
+  0.02s  mathd_algebra_400  ["ring"]
+  0.03s  mathd_algebra_412  ["ring"]
+  0.02s  mathd_algebra_419  ["simp"]
+  0.05s  mathd_algebra_427  ["ring"]
+  0.02s  mathd_algebra_432  ["ring"]
+  0.03s  mathd_algebra_44  ["ring"]
+  0.03s  mathd_algebra_440  ["ring"]
+  0.03s  mathd_algebra_441  ["simp"]
+  0.07s  mathd_algebra_452  ["ring"]
+  0.06s  mathd_algebra_459  ["ring"]
+  0.12s  mathd_algebra_478  ["simp"]
+  0.02s  mathd_algebra_484  ["ring"]
+  0.09s  mathd_algebra_487  ["simp"]
+  0.03s  mathd_algebra_513  ["ring"]
+  0.06s  mathd_algebra_598  ["ring"]
+  0.03s  mathd_algebra_756  ["ring"]
+  0.10s  mathd_algebra_76  ["ring"]
+  0.03s  mathd_algebra_80  ["simp"]
+  0.03s  mathd_numbertheory_100  ["ring"]
+  0.04s  mathd_numbertheory_1124  ["simp"]
+  0.03s  mathd_numbertheory_12  ["ring"]
+  0.03s  mathd_numbertheory_127  ["ring"]
+  0.20s  mathd_numbertheory_135  ["simp"]
+  0.02s  mathd_numbertheory_150  ["ring"]
+  2.52s  mathd_numbertheory_175  ["omega"]
+  0.04s  mathd_numbertheory_185  ["omega"]
+  0.01s  mathd_numbertheory_207  ["simp"]
+  0.01s  mathd_numbertheory_212  ["simp"]
+  0.03s  mathd_numbertheory_222  ["ring"]
+  0.06s  mathd_numbertheory_227  ["ring"]
+  0.00s  mathd_numbertheory_229  ["simp"]
+  0.02s  mathd_numbertheory_233  ["simp"]
+  0.05s  mathd_numbertheory_234  ["simp"]
+  0.00s  mathd_numbertheory_235  ["simp"]
+  0.01s  mathd_numbertheory_237  ["ring"]
+  0.04s  mathd_numbertheory_239  ["ring"]
+  0.05s  mathd_numbertheory_247  ["omega"]
+  0.00s  mathd_numbertheory_254  ["simp"]
+  0.02s  mathd_numbertheory_277  ["ring"]
+  0.04s  mathd_numbertheory_293  ["simp"]
+  0.03s  mathd_numbertheory_296  ["simp"]
+  0.01s  mathd_numbertheory_299  ["simp"]
+  0.01s  mathd_numbertheory_3  ["ring"]
+  0.05s  mathd_numbertheory_314  ["simp"]
+  0.03s  mathd_numbertheory_320  ["omega"]
+  0.00s  mathd_numbertheory_321  ["simp"]
+  0.02s  mathd_numbertheory_328  ["omega"]
+  0.03s  mathd_numbertheory_34  ["omega"]
+  0.07s  mathd_numbertheory_341  ["simp"]
+  0.00s  mathd_numbertheory_342  ["simp"]
+  0.01s  mathd_numbertheory_343  ["ring"]
+  0.01s  mathd_numbertheory_345  ["simp"]
+  0.01s  mathd_numbertheory_353  ["simp"]
+  0.01s  mathd_numbertheory_427  ["simp"]
+  0.14s  mathd_numbertheory_430  ["simp"]
+  0.15s  mathd_numbertheory_435  ["ring"]
+  0.03s  mathd_numbertheory_447  ["ring"]
+  0.04s  mathd_numbertheory_451  ["ring"]
+  0.04s  mathd_numbertheory_483  ["ring"]
+  0.05s  mathd_numbertheory_495  ["simp"]
+  0.03s  mathd_numbertheory_5  ["simp"]
+  0.00s  mathd_numbertheory_517  ["simp"]
+  0.07s  mathd_numbertheory_521  ["ring"]
+  0.04s  mathd_numbertheory_541  ["ring"]
+  0.00s  mathd_numbertheory_551  ["simp"]
+  0.08s  mathd_numbertheory_552  ["ring"]
+  0.05s  mathd_numbertheory_559  ["omega"]
+  0.04s  mathd_numbertheory_582  ["omega"]
+  0.05s  mathd_numbertheory_618  ["ring"]
+  0.00s  mathd_numbertheory_66  ["simp"]
+  0.05s  mathd_numbertheory_711  ["simp"]
+  0.01s  mathd_numbertheory_728  ["simp"]
+  0.25s  mathd_numbertheory_764  ["ring"]
+  0.04s  mathd_numbertheory_765  ["omega"]
+  0.01s  mathd_numbertheory_769  ["simp"]
+  0.01s  mathd_numbertheory_85  ["simp"]
+  0.05s  mathd_numbertheory_99  ["omega"]
+  0.03s  numbertheory_2pownm1prime_nprime  ["ring"]
+  0.05s  numbertheory_3pow2pownm1mod2pownp3eq2pownp2  ["ring"]
+  0.01s  numbertheory_4x3m7y3neq2003  ["simp"]
+  0.09s  numbertheory_aoddbdiv4asqpbsqmod8eq1  ["simp"]
+  0.08s  numbertheory_exk2powkeqapb2mulbpa2_aeq1  ["simp"]
+  0.08s  numbertheory_fxeq4powxp6powxp9powx_f2powmdvdf2pown  ["simp"]
+  0.05s  numbertheory_notEquiv2i2jasqbsqdiv8  ["simp"]
+  0.01s  numbertheory_x5neqy2p4  ["simp"]
+
+pass@1 = 96.3% (235/244)
+test minif2f_tactic_search_benchmark ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 237.64s
+

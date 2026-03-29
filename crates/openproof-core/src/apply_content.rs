@@ -7,6 +7,55 @@ use crate::helpers::{agent_role_label, next_id, phase_from_role};
 use crate::parser::{derive_goal_label, extract_lean_code_block, parse_assistant_output};
 use crate::state::{AppState, PendingWrite};
 
+/// Derive nogood context from the proof tree: find failed decompositions
+/// where a parent node's children have failed, and format as warnings
+/// for the Planner to avoid repeating those patterns.
+pub fn derive_nogood_context(nodes: &[openproof_protocol::ProofNode]) -> String {
+    let mut nogoods = Vec::new();
+
+    for node in nodes {
+        if node.parent_id.is_none() {
+            continue;
+        }
+        // Find children of this node that have failed.
+        let children: Vec<&openproof_protocol::ProofNode> = nodes
+            .iter()
+            .filter(|n| n.parent_id.as_deref() == Some(&node.id))
+            .collect();
+        if children.is_empty() {
+            continue;
+        }
+        let failed_children: Vec<&openproof_protocol::ProofNode> = children
+            .iter()
+            .filter(|c| {
+                c.status == ProofNodeStatus::Failed || c.status == ProofNodeStatus::Abandoned
+            })
+            .copied()
+            .collect();
+        if failed_children.is_empty() {
+            continue;
+        }
+        // This node had a decomposition where children failed.
+        let sub_types: Vec<String> = children.iter().map(|c| c.statement.clone()).collect();
+        let failed_labels: Vec<String> = failed_children.iter().map(|c| c.label.clone()).collect();
+        nogoods.push(format!(
+            "- Decomposed '{}' into [{}]. Failed on: [{}]",
+            node.label,
+            sub_types.join(", "),
+            failed_labels.join(", "),
+        ));
+    }
+
+    if nogoods.is_empty() {
+        return String::new();
+    }
+
+    format!(
+        "\n\nPREVIOUS FAILED DECOMPOSITIONS (do NOT repeat):\n{}\n",
+        nogoods.join("\n"),
+    )
+}
+
 impl AppState {
     pub(crate) fn apply_append_assistant(&mut self, content: String) -> Option<PendingWrite> {
         let text = content.trim();
@@ -75,6 +124,34 @@ impl AppState {
                 session.proof.phase = "formalizing".to_string();
                 session.proof.pending_question = Some(question);
                 session.proof.awaiting_clarification = true;
+            }
+            // Consistency check: reject obviously bad decompositions.
+            let parent_statement = session
+                .proof
+                .active_node_id
+                .as_deref()
+                .and_then(|pid| session.proof.nodes.iter().find(|n| n.id == pid))
+                .map(|n| n.statement.as_str())
+                .unwrap_or("");
+            let sub_lemmas: Vec<(String, String)> = parsed
+                .created_nodes
+                .iter()
+                .map(|c| (c.label.clone(), c.statement.clone()))
+                .collect();
+            if !sub_lemmas.is_empty() {
+                let issues = crate::decomposition_checks::check_decomposition_consistency(
+                    parent_statement,
+                    &sub_lemmas,
+                );
+                if !issues.is_empty() {
+                    session.transcript.push(TranscriptEntry {
+                        id: next_id("native_msg"),
+                        role: MessageRole::Notice,
+                        title: Some("Decomposition Warning".to_string()),
+                        content: format!("Issues with proposed sub-lemmas: {}", issues.join("; ")),
+                        created_at: session.updated_at.clone(),
+                    });
+                }
             }
             for created in &parsed.created_nodes {
                 // Sub-lemmas are children of the current active node

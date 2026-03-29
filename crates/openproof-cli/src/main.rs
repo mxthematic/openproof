@@ -1,5 +1,6 @@
 mod autonomous;
 mod autonomous_headless;
+mod decomposition;
 mod event_loop;
 mod export;
 mod helpers;

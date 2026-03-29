@@ -3,6 +3,7 @@ mod apply_content;
 mod apply_input;
 mod apply_streaming;
 mod commands;
+pub mod decomposition_checks;
 mod helpers;
 mod parser;
 mod proof;
@@ -10,6 +11,7 @@ mod reports;
 mod session;
 mod state;
 
+pub use apply_content::derive_nogood_context;
 pub use commands::{
     build_focus_items, command_completions, delete_word_backward_pos, SLASH_COMMANDS,
 };

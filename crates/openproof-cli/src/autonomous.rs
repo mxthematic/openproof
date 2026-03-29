@@ -283,48 +283,152 @@ pub fn run_autonomous_step(
         });
 
     if let Some(basis) = repair_basis {
-        // BACKTRACKING: After 3+ failed repairs, abandon this approach entirely.
-        // attempt_count 3-5: try a different proof strategy
-        // attempt_count 6+: decompose into sub-lemmas
-        if basis.attempt_count >= 6 {
-            // DECOMPOSITION: break into sub-lemmas
-            actions.push(format!(
-                "Decomposing: {} failed repairs. Breaking into sub-lemmas.",
-                basis.attempt_count
-            ));
+        // SMART DECOMPOSITION: use subtree health scores + BFS metrics
+        // to decide when and where to decompose, instead of waiting for
+        // a fixed failure count.
+        let subtree_scores = crate::decomposition::compute_subtree_scores(
+            &latest_session.proof.nodes,
+            &latest_session.proof.branches,
+        );
+        let nogood_ctx = openproof_core::derive_nogood_context(&latest_session.proof.nodes);
+        let focus_node = basis
+            .focus_node_id
+            .as_deref()
+            .or(latest_session.proof.active_node_id.as_deref())
+            .unwrap_or("");
+        let decomp_action =
+            crate::decomposition::decide_action(focus_node, &subtree_scores, basis.attempt_count);
 
-            let decompose_context = format!(
-                "The proof of {} has failed {} times with both the original and alternative approaches.\n\n\
-                 DECOMPOSE this goal into 2-4 independent sub-lemmas. For each sub-lemma:\n\
-                 1. Emit LEMMA: <label> :: <Lean type signature>\n\
-                 2. Give a brief justification of why this sub-lemma helps\n\
-                 3. Sketch how the sub-lemmas compose into the final proof\n\n\
-                 The sub-lemmas should be EASIER to prove individually than the full goal.\n\
-                 Each will be verified independently by Lean.\n\n\
-                 Current target: {target}\n\nFailed approach summary:\n{}",
-                target, basis.attempt_count, basis.summary,
-            );
+        match decomp_action {
+            crate::decomposition::DecompositionAction::DecomposeLeaf { node_id } => {
+                actions.push(format!(
+                    "Decomposing leaf {node_id} (BFS stalled, subtree score {:.2}).",
+                    subtree_scores.get(&node_id).map_or(0.0, |s| s.score),
+                ));
 
-            let title = format!("{} decomposer", latest_session.title);
-            let (branch_id, session_snapshot) = ensure_hidden_agent_branch(
-                tx.clone(),
-                store.clone(),
-                state,
-                AgentRole::Planner,
-                &title,
-                "Decompose goal into independent sub-lemmas",
-            )?;
-            start_agent_branch_turn(
-                tx,
-                store,
-                AgentRole::Planner,
-                decompose_context,
-                branch_id.clone(),
-                branch_id.clone(),
-                session_snapshot,
-            );
-            actions.push(format!("Started decomposer branch {branch_id}."));
-            return Ok(actions.join("\n"));
+                let decompose_context = format!(
+                    "The proof of {target} is stuck at node {node_id}. \
+                     BFS search has stalled after {} attempts.\n\n\
+                     DECOMPOSE this goal into 2-4 independent sub-lemmas. For each sub-lemma:\n\
+                     1. Emit LEMMA: <label> :: <Lean type signature>\n\
+                     2. Give a brief justification of why this sub-lemma helps\n\
+                     3. Sketch how the sub-lemmas compose into the final proof\n\n\
+                     The sub-lemmas should be EASIER to prove individually than the full goal.\n\
+                     Each will be verified independently by Lean.\n\n\
+                     Current target: {target}\n\nFailed approach summary:\n{}{nogood_ctx}",
+                    basis.attempt_count, basis.summary,
+                );
+
+                let title = format!("{} decomposer", latest_session.title);
+                let (branch_id, session_snapshot) = ensure_hidden_agent_branch(
+                    tx.clone(),
+                    store.clone(),
+                    state,
+                    AgentRole::Planner,
+                    &title,
+                    "Decompose goal into independent sub-lemmas",
+                )?;
+                start_agent_branch_turn(
+                    tx,
+                    store,
+                    AgentRole::Planner,
+                    decompose_context,
+                    branch_id.clone(),
+                    branch_id.clone(),
+                    session_snapshot,
+                );
+                actions.push(format!("Started decomposer branch {branch_id}."));
+                return Ok(actions.join("\n"));
+            }
+            crate::decomposition::DecompositionAction::RedecomposeInterior {
+                node_id,
+                failed_children,
+                reason,
+            } => {
+                actions.push(format!(
+                    "Re-decomposing {node_id}: {reason}. Previous decomposition failed.",
+                ));
+
+                let decompose_context = format!(
+                    "The previous decomposition of {target} has FAILED. {reason}\n\
+                     Failed sub-lemmas: [{}]\n\n\
+                     The decomposition approach was fundamentally wrong. \
+                     Try a COMPLETELY DIFFERENT decomposition strategy.\n\n\
+                     DECOMPOSE this goal into 2-4 independent sub-lemmas. For each sub-lemma:\n\
+                     1. Emit LEMMA: <label> :: <Lean type signature>\n\
+                     2. Give a brief justification of why this sub-lemma helps\n\
+                     3. Sketch how the sub-lemmas compose into the final proof\n\n\
+                     Current target: {target}\n\nFailed approach summary:\n{}{nogood_ctx}",
+                    failed_children.join(", "),
+                    basis.summary,
+                );
+
+                let title = format!("{} re-decomposer", latest_session.title);
+                let (branch_id, session_snapshot) = ensure_hidden_agent_branch(
+                    tx.clone(),
+                    store.clone(),
+                    state,
+                    AgentRole::Planner,
+                    &title,
+                    "Re-decompose goal with a different strategy",
+                )?;
+                start_agent_branch_turn(
+                    tx,
+                    store,
+                    AgentRole::Planner,
+                    decompose_context,
+                    branch_id.clone(),
+                    branch_id.clone(),
+                    session_snapshot,
+                );
+                actions.push(format!("Started re-decomposer branch {branch_id}."));
+                return Ok(actions.join("\n"));
+            }
+            crate::decomposition::DecompositionAction::FullPivot { reason } => {
+                // Fall through to backtracking logic below with a strong signal.
+                actions.push(format!("Full strategy pivot: {reason}"));
+                // Treat as attempt_count >= 3 to trigger new strategy.
+            }
+            crate::decomposition::DecompositionAction::Continue => {
+                // Check legacy fallback: if attempt_count >= 6, still decompose.
+                if basis.attempt_count >= 6 {
+                    actions.push(format!(
+                        "Decomposing (fallback): {} failed repairs.",
+                        basis.attempt_count,
+                    ));
+
+                    let decompose_context = format!(
+                        "The proof of {target} has failed {} times.\n\n\
+                         DECOMPOSE this goal into 2-4 independent sub-lemmas. For each:\n\
+                         1. Emit LEMMA: <label> :: <Lean type signature>\n\
+                         2. Brief justification\n\
+                         3. Sketch how they compose\n\n\
+                         Current target: {target}\n\nSummary:\n{}{nogood_ctx}",
+                        basis.attempt_count, basis.summary,
+                    );
+
+                    let title = format!("{} decomposer", latest_session.title);
+                    let (branch_id, session_snapshot) = ensure_hidden_agent_branch(
+                        tx.clone(),
+                        store.clone(),
+                        state,
+                        AgentRole::Planner,
+                        &title,
+                        "Decompose goal into independent sub-lemmas",
+                    )?;
+                    start_agent_branch_turn(
+                        tx,
+                        store,
+                        AgentRole::Planner,
+                        decompose_context,
+                        branch_id.clone(),
+                        branch_id.clone(),
+                        session_snapshot,
+                    );
+                    actions.push(format!("Started decomposer branch {branch_id}."));
+                    return Ok(actions.join("\n"));
+                }
+            }
         }
 
         if basis.attempt_count >= 3 {
@@ -1290,26 +1394,49 @@ fn emit_search_result(
     line: usize,
     result: openproof_search::config::SearchResult,
 ) {
-    let (solved, tactics) = match &result {
-        openproof_search::config::SearchResult::Solved { tactics, .. } => (true, tactics.clone()),
-        openproof_search::config::SearchResult::Partial { tactics, .. } => (false, tactics.clone()),
-        _ => (false, vec![]),
-    };
-    let status = match &result {
-        openproof_search::config::SearchResult::Solved { .. } => "SOLVED",
-        openproof_search::config::SearchResult::Partial { .. } => "partial",
-        openproof_search::config::SearchResult::Exhausted { .. } => "exhausted",
-        openproof_search::config::SearchResult::Timeout { .. } => "timeout",
+    use openproof_search::config::SearchResult;
+
+    let (solved, tactics, remaining_goals, expansions, outcome) = match &result {
+        SearchResult::Solved { tactics, .. } => (true, tactics.clone(), Some(0), None, "solved"),
+        SearchResult::Partial {
+            tactics,
+            remaining_goals,
+            ..
+        } => (
+            false,
+            tactics.clone(),
+            Some(*remaining_goals),
+            None,
+            "partial",
+        ),
+        SearchResult::Exhausted { expansions } => {
+            (false, vec![], None, Some(*expansions), "exhausted")
+        }
+        SearchResult::Timeout {
+            best_tactics,
+            remaining_goals,
+        } => (
+            false,
+            best_tactics.clone(),
+            Some(*remaining_goals),
+            None,
+            "timeout",
+        ),
     };
     eprintln!(
-        "[tactic-search] Line {line}: {status} (tactics: {})",
-        tactics.join("; ")
+        "[tactic-search] Line {line}: {outcome} (tactics: {}, remaining: {}, expansions: {})",
+        tactics.join("; "),
+        remaining_goals.map_or("?".to_string(), |g| g.to_string()),
+        expansions.map_or("?".to_string(), |e| e.to_string()),
     );
     let _ = tx.send(AppEvent::TacticSearchComplete {
         node_id: node_id.to_string(),
         sorry_line: line,
         solved,
         tactics,
+        remaining_goals,
+        expansions,
+        search_outcome: outcome.to_string(),
     });
 }
 

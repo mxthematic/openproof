@@ -24,6 +24,88 @@ function badgeClass(ok) {
   return "badge badge-yellow";
 }
 
+// ── Decomposition scoring (client-side, mirrors Rust logic) ────────────
+
+function scoreLeaf(branch) {
+  const history = branch?.search_history || [];
+  if (history.length === 0) return 0.5;
+  if (history.some((h) => h.outcome === "solved")) return 1.0;
+  if (history.length < 2) return 0.4;
+
+  let score = 0.5;
+  const goals = history.map((h) => h.remaining_goals);
+  const improving = goals.some((g, i) => i > 0 && g < goals[i - 1]);
+  const flatlined = goals.every((g, i) => i === 0 || g === goals[i - 1]);
+
+  if (improving) score += 0.2;
+  if (flatlined && history.length >= 3) score -= 0.3;
+  if (history.filter((h) => h.timed_out).length >= 2) score -= 0.3;
+  if (history.filter((h) => h.outcome === "exhausted" && h.remaining_goals > 0).length >= 2) score -= 0.2;
+
+  return Math.max(0, Math.min(1, score));
+}
+
+function computeSubtreeScores(nodes, branches) {
+  const scores = {};
+  // Leaf scores from branches
+  const leafScores = {};
+  for (const b of branches) {
+    const nid = b.focus_node_id || b.focusNodeId;
+    if (nid) {
+      const s = scoreLeaf(b);
+      leafScores[nid] = Math.max(leafScores[nid] || 0, s);
+    }
+  }
+  // Verified nodes = solved
+  for (const n of nodes) {
+    if ((n.status || "").toLowerCase() === "verified") leafScores[n.id] = 1.0;
+  }
+  // Parent -> children map
+  const childrenOf = {};
+  for (const n of nodes) {
+    const pid = n.parent_id || n.parentId;
+    if (pid) {
+      if (!childrenOf[pid]) childrenOf[pid] = [];
+      childrenOf[pid].push(n.id);
+    }
+  }
+  // Bottom-up: sort by depth descending
+  const sorted = [...nodes].sort((a, b) => (b.depth || 0) - (a.depth || 0));
+  for (const node of sorted) {
+    const kids = childrenOf[node.id];
+    if (!kids || kids.length === 0) {
+      const ls = leafScores[node.id] ?? 0.5;
+      scores[node.id] = { score: ls, worstChild: null, solved: ls >= 1.0 ? 1 : 0, total: 1 };
+    } else {
+      let minScore = 1.0, worstId = null, solved = 0;
+      for (const cid of kids) {
+        const cs = scores[cid]?.score ?? 0.5;
+        if (cs >= 1.0) solved++;
+        if (cs < minScore) { minScore = cs; worstId = cid; }
+      }
+      scores[node.id] = { score: minScore, worstChild: worstId, solved, total: kids.length };
+    }
+  }
+  return scores;
+}
+
+function scoreColor(score) {
+  if (score >= 0.8) return "#4ade80";  // green
+  if (score >= 0.5) return "#facc15";  // yellow
+  if (score >= 0.3) return "#fb923c";  // orange
+  return "#ef4444";                     // red
+}
+
+function formatSearchHistory(history) {
+  if (!history || history.length === 0) return null;
+  const last = history[history.length - 1];
+  const goals = history.map((h) => h.remaining_goals);
+  const trend = goals.length >= 2
+    ? (goals[goals.length - 1] < goals[goals.length - 2] ? "improving" : goals[goals.length - 1] === goals[goals.length - 2] ? "flat" : "regressing")
+    : "n/a";
+  return `${history.length} searches | last: ${last.outcome} (${last.remaining_goals} goals, ${last.expansions} exp) | trend: ${trend}`;
+}
+
 // ── App ─────────────────────────────────────────────────────────────────
 
 function App() {
@@ -141,21 +223,49 @@ function OverviewTab({ session }) {
   const nodes = proof?.nodes || [];
   const branches = proof?.branches || [];
   const verification = proof?.last_verification;
+  const subtreeScores = computeSubtreeScores(nodes, branches);
+
+  // Build branch lookup by focus node
+  const branchByNode = {};
+  for (const b of branches) {
+    const nid = b.focus_node_id || b.focusNodeId;
+    if (nid) branchByNode[nid] = b;
+  }
 
   return h`
     <div className="overview">
       <div className="overview-panel">
-        <div className="panel-title">Proof Nodes (${nodes.length})</div>
+        <div className="panel-title">Proof Tree (${nodes.length} nodes)</div>
         <div className="panel-body">
           ${nodes.length === 0 ? h`<div style=${{ padding: "12px", color: "var(--muted)" }}>No nodes yet</div>` : null}
-          ${nodes.map((n) => h`
-            <div key=${n.id} className="node-row">
-              <div className=${`node-dot ${statusDot(n.status)}`} />
-              <span className="node-kind">${n.kind || "node"}</span>
-              <span className="node-label">${n.label}</span>
-              <span className="node-statement">${n.statement}</span>
-            </div>
-          `)}
+          ${nodes.map((n) => {
+            const ss = subtreeScores[n.id];
+            const sc = ss?.score ?? null;
+            const branch = branchByNode[n.id];
+            const searchInfo = branch ? formatSearchHistory(branch.search_history) : null;
+            const indent = (n.depth || 0) * 16;
+            return h`
+              <div key=${n.id} className="node-row" style=${{ paddingLeft: indent + "px" }}>
+                <div className=${`node-dot ${statusDot(n.status)}`} />
+                ${sc !== null ? h`
+                  <span className="node-score" style=${{ color: scoreColor(sc) }}>
+                    ${(sc * 100).toFixed(0)}%
+                  </span>
+                ` : null}
+                <span className="node-kind">${n.kind || "node"}</span>
+                <span className="node-label">${n.label}</span>
+                <span className="node-statement">${n.statement}</span>
+                ${ss && ss.total > 1 ? h`
+                  <span className="node-children-info">
+                    (${ss.solved}/${ss.total} solved)
+                  </span>
+                ` : null}
+                ${searchInfo ? h`
+                  <div className="node-search-info">${searchInfo}</div>
+                ` : null}
+              </div>
+            `;
+          })}
           ${verification ? h`
             <div className="verify-banner">
               <span className=${verification.ok ? "verify-pass" : "verify-fail"}>
@@ -173,19 +283,39 @@ function OverviewTab({ session }) {
         <div className="panel-title">Branches (${branches.length})</div>
         <div className="panel-body">
           ${branches.length === 0 ? h`<div style=${{ padding: "12px", color: "var(--muted)" }}>No branches yet</div>` : null}
-          ${branches.map((b) => h`
-            <div key=${b.id} className="branch-card">
-              <div className="branch-header">
-                <span className="branch-role">${b.role}</span>
-                <span className="branch-title">${b.title}</span>
-                <span className=${badgeClass(b.status === "done")}>${b.status}</span>
+          ${branches.map((b) => {
+            const history = b.search_history || [];
+            const lastSearch = history.length > 0 ? history[history.length - 1] : null;
+            return h`
+              <div key=${b.id} className="branch-card">
+                <div className="branch-header">
+                  <span className="branch-role">${b.role}</span>
+                  <span className="branch-title">${b.title}</span>
+                  <span className=${badgeClass(b.status === "done")}>${b.status}</span>
+                  ${b.attempt_count > 0 ? h`
+                    <span className="branch-attempts">${b.attempt_count} attempts</span>
+                  ` : null}
+                </div>
+                ${lastSearch ? h`
+                  <div className="branch-search-metrics">
+                    Last search: ${lastSearch.outcome}
+                    ${lastSearch.remaining_goals != null ? ` | ${lastSearch.remaining_goals} goals remaining` : ""}
+                    ${lastSearch.expansions ? ` | ${lastSearch.expansions} expansions` : ""}
+                    ${lastSearch.timed_out ? " | TIMED OUT" : ""}
+                  </div>
+                ` : null}
+                ${history.length > 1 ? h`
+                  <div className="branch-search-trend">
+                    Goals trend: [${history.map((h) => h.remaining_goals).join(", ")}]
+                  </div>
+                ` : null}
+                ${b.lean_snippet || b.leanSnippet ? h`
+                  <pre className="branch-snippet">${b.lean_snippet || b.leanSnippet}</pre>
+                ` : null}
+                ${b.summary ? h`<div className="branch-status">${b.summary}</div>` : null}
               </div>
-              ${b.lean_snippet || b.leanSnippet ? h`
-                <pre className="branch-snippet">${b.lean_snippet || b.leanSnippet}</pre>
-              ` : null}
-              ${b.summary ? h`<div className="branch-status">${b.summary}</div>` : null}
-            </div>
-          `)}
+            `;
+          })}
         </div>
       </div>
     </div>
