@@ -46,3 +46,56 @@ pub fn check_decomposition_consistency(
 
     issues
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_decomposition() {
+        let issues = check_decomposition_consistency(
+            "a + b = b + a",
+            &[
+                ("comm_add".into(), "a + b = b + a -> True".into()),
+                ("helper".into(), "b + a = a + b".into()),
+            ],
+        );
+        assert!(issues.is_empty(), "Expected no issues, got: {:?}", issues);
+    }
+
+    #[test]
+    fn catches_circular_decomposition() {
+        let issues = check_decomposition_consistency(
+            "a + b = b + a",
+            &[("circ".into(), "a + b = b + a".into())],
+        );
+        assert!(issues.iter().any(|i| i.contains("identical")));
+    }
+
+    #[test]
+    fn catches_duplicate_sub_lemmas() {
+        let issues = check_decomposition_consistency(
+            "parent",
+            &[
+                ("lem1".into(), "x = y".into()),
+                ("lem2".into(), "x = y".into()),
+            ],
+        );
+        assert!(issues.iter().any(|i| i.contains("Duplicate")));
+    }
+
+    #[test]
+    fn catches_too_many_sub_lemmas() {
+        let many: Vec<(String, String)> = (0..8)
+            .map(|i| (format!("lem{i}"), format!("stmt{i}")))
+            .collect();
+        let issues = check_decomposition_consistency("parent", &many);
+        assert!(issues.iter().any(|i| i.contains("Too many")));
+    }
+
+    #[test]
+    fn catches_empty_decomposition() {
+        let issues = check_decomposition_consistency("parent", &[]);
+        assert!(issues.iter().any(|i| i.contains("No sub-lemmas")));
+    }
+}

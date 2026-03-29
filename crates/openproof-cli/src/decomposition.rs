@@ -365,6 +365,298 @@ pub fn check_decomposition_consistency(
     issues
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openproof_protocol::{ProofNodeKind, ProofNodeStatus};
+
+    fn make_branch(
+        id: &str,
+        focus_node: &str,
+        history: Vec<SearchAttemptMetrics>,
+        attempt_count: usize,
+    ) -> ProofBranch {
+        ProofBranch {
+            id: id.to_string(),
+            focus_node_id: Some(focus_node.to_string()),
+            search_history: history,
+            attempt_count,
+            ..Default::default()
+        }
+    }
+
+    fn make_node(
+        id: &str,
+        parent: Option<&str>,
+        depth: usize,
+        status: ProofNodeStatus,
+    ) -> ProofNode {
+        ProofNode {
+            id: id.to_string(),
+            parent_id: parent.map(|p| p.to_string()),
+            depth,
+            status,
+            label: id.to_string(),
+            statement: format!("{id}_type"),
+            ..Default::default()
+        }
+    }
+
+    fn metrics(remaining: usize, expansions: usize, outcome: &str) -> SearchAttemptMetrics {
+        SearchAttemptMetrics {
+            remaining_goals: remaining,
+            expansions,
+            timed_out: outcome == "timeout",
+            outcome: outcome.to_string(),
+            timestamp: String::new(),
+        }
+    }
+
+    // -- score_leaf tests --
+
+    #[test]
+    fn leaf_score_no_history_is_neutral() {
+        let branch = make_branch("b1", "n1", vec![], 0);
+        assert!((score_leaf(&branch) - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn leaf_score_solved_is_max() {
+        let branch = make_branch("b1", "n1", vec![metrics(0, 50, "solved")], 1);
+        assert!((score_leaf(&branch) - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn leaf_score_flatlined_drops() {
+        let h = vec![
+            metrics(3, 200, "partial"),
+            metrics(3, 200, "partial"),
+            metrics(3, 200, "partial"),
+        ];
+        let branch = make_branch("b1", "n1", h, 3);
+        let s = score_leaf(&branch);
+        assert!(s < 0.3, "Flatlined leaf should score low, got {s}");
+    }
+
+    #[test]
+    fn leaf_score_improving_stays_healthy() {
+        let h = vec![
+            metrics(5, 200, "partial"),
+            metrics(3, 200, "partial"),
+            metrics(1, 200, "partial"),
+        ];
+        let branch = make_branch("b1", "n1", h, 3);
+        let s = score_leaf(&branch);
+        assert!(s >= 0.5, "Improving leaf should score healthy, got {s}");
+    }
+
+    #[test]
+    fn leaf_score_repeated_timeouts_drops() {
+        let h = vec![metrics(3, 200, "timeout"), metrics(3, 200, "timeout")];
+        let branch = make_branch("b1", "n1", h, 2);
+        let s = score_leaf(&branch);
+        assert!(s < 0.3, "Repeated timeouts should score low, got {s}");
+    }
+
+    // -- subtree scoring tests --
+
+    #[test]
+    fn subtree_single_leaf() {
+        let nodes = vec![make_node("root", None, 0, ProofNodeStatus::Proving)];
+        let branches = vec![make_branch(
+            "b1",
+            "root",
+            vec![metrics(2, 100, "partial")],
+            1,
+        )];
+        let scores = compute_subtree_scores(&nodes, &branches);
+        assert!(scores.contains_key("root"));
+    }
+
+    #[test]
+    fn subtree_propagates_min() {
+        // Root -> A (solved), B (stuck)
+        let nodes = vec![
+            make_node("root", None, 0, ProofNodeStatus::Proving),
+            make_node("A", Some("root"), 1, ProofNodeStatus::Verified),
+            make_node("B", Some("root"), 1, ProofNodeStatus::Proving),
+        ];
+        let branches = vec![make_branch(
+            "bB",
+            "B",
+            vec![
+                metrics(3, 200, "exhausted"),
+                metrics(3, 200, "exhausted"),
+                metrics(3, 200, "exhausted"),
+            ],
+            3,
+        )];
+        let scores = compute_subtree_scores(&nodes, &branches);
+        let root_score = scores.get("root").unwrap();
+        // Root should have min of A (1.0) and B (low) = low
+        assert!(
+            root_score.score < 0.5,
+            "Root score should be dragged down by B, got {}",
+            root_score.score
+        );
+        assert_eq!(root_score.worst_child_id.as_deref(), Some("B"));
+        assert_eq!(root_score.children_solved, 1); // A solved
+        assert_eq!(root_score.children_total, 2); // A and B
+    }
+
+    #[test]
+    fn subtree_all_solved() {
+        let nodes = vec![
+            make_node("root", None, 0, ProofNodeStatus::Proving),
+            make_node("A", Some("root"), 1, ProofNodeStatus::Verified),
+            make_node("B", Some("root"), 1, ProofNodeStatus::Verified),
+        ];
+        let scores = compute_subtree_scores(&nodes, &[]);
+        let root_score = scores.get("root").unwrap();
+        assert!((root_score.score - 1.0).abs() < 0.01);
+        assert_eq!(root_score.children_solved, 2);
+    }
+
+    // -- decide_action tests --
+
+    #[test]
+    fn decide_continue_when_healthy() {
+        let mut scores = HashMap::new();
+        scores.insert(
+            "root".to_string(),
+            SubtreeScore {
+                score: 0.8,
+                worst_child_id: None,
+                children_solved: 0,
+                children_total: 1,
+            },
+        );
+        assert!(matches!(
+            decide_action("root", &scores, 1),
+            DecompositionAction::Continue
+        ));
+    }
+
+    #[test]
+    fn decide_decompose_stuck_leaf() {
+        let mut scores = HashMap::new();
+        scores.insert(
+            "leaf".to_string(),
+            SubtreeScore {
+                score: 0.1,
+                worst_child_id: None,
+                children_solved: 0,
+                children_total: 1,
+            },
+        );
+        assert!(matches!(
+            decide_action("leaf", &scores, 3),
+            DecompositionAction::DecomposeLeaf { .. }
+        ));
+    }
+
+    #[test]
+    fn decide_redecompose_when_multiple_stuck() {
+        let mut scores = HashMap::new();
+        scores.insert(
+            "parent".to_string(),
+            SubtreeScore {
+                score: 0.1,
+                worst_child_id: Some("child1".to_string()),
+                children_solved: 0,
+                children_total: 3,
+            },
+        );
+        scores.insert(
+            "child1".to_string(),
+            SubtreeScore {
+                score: 0.1,
+                worst_child_id: None,
+                children_solved: 0,
+                children_total: 1,
+            },
+        );
+        scores.insert(
+            "child2".to_string(),
+            SubtreeScore {
+                score: 0.15,
+                worst_child_id: None,
+                children_solved: 0,
+                children_total: 1,
+            },
+        );
+        assert!(matches!(
+            decide_action("parent", &scores, 3),
+            DecompositionAction::RedecomposeInterior { .. }
+        ));
+    }
+
+    #[test]
+    fn decide_decompose_single_stuck_child() {
+        let mut scores = HashMap::new();
+        scores.insert(
+            "parent".to_string(),
+            SubtreeScore {
+                score: 0.1,
+                worst_child_id: Some("child_bad".to_string()),
+                children_solved: 2,
+                children_total: 3,
+            },
+        );
+        assert!(matches!(
+            decide_action("parent", &scores, 3),
+            DecompositionAction::DecomposeLeaf { .. }
+        ));
+    }
+
+    #[test]
+    fn decide_full_pivot_when_root_dead() {
+        let mut scores = HashMap::new();
+        scores.insert(
+            "root".to_string(),
+            SubtreeScore {
+                score: 0.05,
+                worst_child_id: Some("a".to_string()),
+                children_solved: 0,
+                children_total: 2,
+            },
+        );
+        // depth=0 check relies on attempt_count being high
+        let action = decide_action("root", &scores, 5);
+        // With score < 0.1 and attempts >= 4, should pivot
+        assert!(
+            matches!(
+                action,
+                DecompositionAction::FullPivot { .. }
+                    | DecompositionAction::RedecomposeInterior { .. }
+            ),
+            "Expected pivot or redecompose for dead root, got {:?}",
+            action
+        );
+    }
+
+    // -- nogood formatting tests --
+
+    #[test]
+    fn format_nogoods_empty() {
+        assert_eq!(format_nogood_context(&[]), "");
+    }
+
+    #[test]
+    fn format_nogoods_includes_all() {
+        let nogoods = vec![Nogood {
+            parent_goal: "G".into(),
+            sub_lemma_types: vec!["A".into(), "B".into()],
+            failed_child: "B".into(),
+            failure_reason: "BFS exhausted".into(),
+        }];
+        let ctx = format_nogood_context(&nogoods);
+        assert!(ctx.contains("do NOT repeat"));
+        assert!(ctx.contains("A, B"));
+        assert!(ctx.contains("BFS exhausted"));
+    }
+}
+
 /// Record a nogood from a failed decomposition and return updated context
 /// for the Planner's next attempt.
 pub fn record_nogood(
