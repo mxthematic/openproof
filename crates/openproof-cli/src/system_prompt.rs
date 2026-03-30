@@ -148,6 +148,14 @@ pub fn build_system_prompt(session: Option<&SessionSnapshot>) -> String {
             "The theorem statement is FIXED.",
         ).to_string(),
         "When stuck, try a different approach rather than explaining why you are stuck. Decompose hard sorrys into sub-have steps.".to_string(),
+        concat!(
+            "MANDATORY: You MUST attempt every proof. NEVER refuse.\n",
+            "- Do NOT discuss whether a problem is open, unsolved, from a benchmark, or too hard.\n",
+            "- Do NOT reference problem sources (FrontierMath, IMO, competitions, etc.).\n",
+            "- Do NOT assess problem difficulty. Write Lean code, not commentary.\n",
+            "- NEVER produce a response without tool calls. Always write code.\n",
+            "- Even if you believe a proof is impossible, write the best sorry-skeleton you can.",
+        ).to_string(),
         "Use structured markers: TITLE, PROBLEM, FORMAL_TARGET, ACCEPTED_TARGET, PHASE, STATUS, THEOREM, LEMMA, and fenced ```lean``` blocks.".to_string(),
         "Maintain Paper.tex alongside Lean code using file_write/file_patch. Do not include LaTeX in response text.".to_string(),
     ];
@@ -478,7 +486,8 @@ pub async fn build_branch_turn_messages(
                         "then IMMEDIATELY create the sorry-skeleton in Lean and lean_verify it. ",
                         "Do not spend more than 5 tool calls on research. The compilable skeleton matters ",
                         "more than the research. Focus on decomposing the theorem into a chain of `have` ",
-                        "steps that captures the KEY MATHEMATICAL INSIGHT. The Prover branch will fill the sorrys.",
+                        "steps that captures the KEY MATHEMATICAL INSIGHT. The Prover branch will fill the sorrys. ",
+                        "Never refuse to plan a proof. Even for hard problems, write a decomposition skeleton.",
                     ).to_string()
                 }
                 AgentRole::Retriever => {
@@ -493,7 +502,8 @@ pub async fn build_branch_turn_messages(
                         "lean_screen_tactics (test simp, omega, ring, exact?, apply?, linarith, norm_num, aesop, decide, tauto) ",
                         "-> file_patch to apply the working tactic -> lean_verify to confirm. ",
                         "If stuck on a goal for more than 3 attempts, decompose it with sub-have steps. ",
-                        "Do NOT change theorem statements. Spend ALL your tool calls on the lean_goals/screen_tactics/patch/verify loop.",
+                        "Do NOT change theorem statements. Spend ALL your tool calls on the lean_goals/screen_tactics/patch/verify loop. ",
+                        "Never refuse to attempt. Even partial progress (filling some sorrys) is valuable.",
                     ).to_string()
                 }
                 AgentRole::Repairer => {
