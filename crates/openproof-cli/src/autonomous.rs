@@ -1315,11 +1315,13 @@ pub async fn run_tactic_search_file(file_path: String) -> Result<()> {
     // Extract the type expression for the fallback goal
     let type_expr = extract_type_expr_from_content(&content).unwrap_or_default();
 
-    let mut node = openproof_protocol::ProofNode::default();
-    node.id = "root".to_string();
-    node.content = content.clone();
-    node.statement = type_expr;
-    node.status = openproof_protocol::ProofNodeStatus::Pending;
+    let node = openproof_protocol::ProofNode {
+        id: "root".to_string(),
+        content: content.clone(),
+        statement: type_expr,
+        status: openproof_protocol::ProofNodeStatus::Pending,
+        ..Default::default()
+    };
     let mut proof = openproof_protocol::ProofSessionState::default();
     proof.nodes.push(node);
     proof.active_node_id = Some("root".to_string());
@@ -2123,7 +2125,7 @@ fn extract_type_expr_from_content(content: &str) -> Option<String> {
     let mut kw_idx = None;
     for kw in ["theorem ", "lemma ", "def "] {
         if let Some(idx) = before.rfind(kw) {
-            if kw_idx.map_or(true, |prev| idx > prev) {
+            if kw_idx.is_none_or(|prev| idx > prev) {
                 kw_idx = Some(idx);
             }
         }

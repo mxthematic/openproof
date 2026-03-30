@@ -368,7 +368,7 @@ pub fn check_decomposition_consistency(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openproof_protocol::{ProofNodeKind, ProofNodeStatus};
+    use openproof_protocol::{ProofNodeKind, ProofNodeStatus, SearchAttemptMetrics};
 
     fn make_branch(
         id: &str,

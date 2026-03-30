@@ -98,6 +98,7 @@ pub async fn run_agentic_loop(
     }
     let mut turn_used_tools = false;
     let mut last_verify_ok = false;
+    let mut refusal_retries: u8 = 0;
 
     // Spawn lean-lsp-mcp for structured goal access (fallback when Pantograph unavailable).
     let lsp_mcp: Option<Arc<Mutex<LeanLspMcp>>> = LeanLspMcp::spawn(&project_dir)
@@ -138,7 +139,16 @@ pub async fn run_agentic_loop(
             Ok(result) => {
                 // If there are no tool calls, we are done.
                 if result.tool_calls.is_empty() {
-                    // Text was streamed via StreamDelta events.
+                    // Detect refusal and force retry before giving up.
+                    if refusal_retries < crate::refusal::MAX_REFUSAL_RETRIES
+                        && crate::refusal::detect_refusal(&result.text, turn_used_tools)
+                    {
+                        refusal_retries += 1;
+                        let retry = crate::refusal::refusal_retry_message(refusal_retries);
+                        messages.push(TurnMessage::chat("assistant", &result.text));
+                        messages.push(TurnMessage::chat("system", &retry));
+                        continue;
+                    }
                     break;
                 }
 
@@ -427,6 +437,7 @@ pub fn start_agent_branch_turn(
         let mut accumulated_text = String::new();
         let mut turn_used_tools = false;
         let mut last_verify_ok = false;
+        let mut refusal_retries: u8 = 0;
 
         let branch_lsp_mcp: Option<Arc<Mutex<LeanLspMcp>>> = LeanLspMcp::spawn(&project_dir)
             .map(|c| Arc::new(Mutex::new(c)))
@@ -452,6 +463,15 @@ pub fn start_agent_branch_turn(
                 Ok(turn) => {
                     accumulated_text.push_str(&turn.text);
                     if turn.tool_calls.is_empty() {
+                        if refusal_retries < crate::refusal::MAX_REFUSAL_RETRIES
+                            && crate::refusal::detect_refusal(&accumulated_text, turn_used_tools)
+                        {
+                            refusal_retries += 1;
+                            let retry = crate::refusal::refusal_retry_message(refusal_retries);
+                            all_messages.push(TurnMessage::chat("assistant", &turn.text));
+                            all_messages.push(TurnMessage::chat("system", &retry));
+                            continue;
+                        }
                         break;
                     }
                     turn_used_tools = true;

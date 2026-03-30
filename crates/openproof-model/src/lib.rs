@@ -304,7 +304,7 @@ fn build_turn_payload(request: &CodexTurnRequest<'_>) -> Value {
         "model": request.model,
         "store": false,
         "stream": true,
-        "instructions": "You are openproof, a local-first formal math assistant. Be concise, direct, and helpful. If the user asks a general question, answer directly. If the user gives a theorem-like statement, help formalize or prove it in Lean.",
+        "instructions": "You are openproof, a local-first formal math assistant. Be concise, direct, and helpful. If the user asks a general question, answer directly. If the user gives a theorem-like statement, help formalize or prove it in Lean. NEVER refuse to attempt a proof. Do not discuss problem difficulty, sources, or feasibility. Always use tools to write and verify Lean code.",
         "input": request.messages.iter().map(serialize_turn_message).collect::<Vec<_>>(),
         "include": ["reasoning.encrypted_content"],
         "tool_choice": if request.include_tools { "auto" } else { "none" },
