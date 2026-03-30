@@ -1294,6 +1294,46 @@ pub async fn run_tactic_search_once(session_id: String) -> Result<()> {
     Ok(())
 }
 
+/// Run tactic search on a standalone Lean file (no session needed).
+/// Creates a temporary workspace and session, runs search, exports verified data.
+pub async fn run_tactic_search_file(file_path: String) -> Result<()> {
+    let content = fs::read_to_string(&file_path).with_context(|| format!("reading {file_path}"))?;
+
+    let sorry_count = openproof_lean::find_sorry_positions(&content).len();
+    anyhow::ensure!(sorry_count > 0, "No sorrys found in {file_path}");
+
+    let store = AppStore::open(StorePaths::detect()?)?;
+
+    // Create a minimal session via the store's own API
+    let session_id = format!("expert_file_{}", chrono::Utc::now().timestamp_millis());
+
+    // Write the lean file to a workspace directory the store can find
+    let workspace_dir = store.workspace_dir(&session_id);
+    fs::create_dir_all(&workspace_dir)?;
+    fs::write(workspace_dir.join("Main.lean"), &content)?;
+
+    // Build a session snapshot with just enough for tactic search
+    let mut node = openproof_protocol::ProofNode::default();
+    node.id = "root".to_string();
+    node.content = content.clone();
+    node.status = openproof_protocol::ProofNodeStatus::Pending;
+    let mut proof = openproof_protocol::ProofSessionState::default();
+    proof.nodes.push(node);
+    proof.active_node_id = Some("root".to_string());
+
+    let session = openproof_protocol::SessionSnapshot {
+        id: session_id.clone(),
+        title: file_path.clone(),
+        proof,
+        ..Default::default()
+    };
+    store.save_session(&session)?;
+
+    eprintln!("[tactic-search] File: {file_path}, {sorry_count} sorry(s), session: {session_id}");
+
+    run_tactic_search_once(session_id).await
+}
+
 fn tactic_proposer_backend(config: Option<&crate::setup::SetupResult>) -> TacticProposerBackend {
     if let Ok(value) = std::env::var("OPENPROOF_TACTIC_PROPOSER") {
         let normalized = value.trim().to_ascii_lowercase();

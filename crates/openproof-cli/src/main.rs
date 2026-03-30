@@ -29,7 +29,8 @@ enum Command {
         prompt: String,
     },
     TacticSearch {
-        resume: String,
+        resume: Option<String>,
+        file: Option<String>,
     },
     Run {
         problem: String,
@@ -61,7 +62,15 @@ async fn main() -> Result<()> {
         Command::Health => run_health(options.launch_cwd).await,
         Command::Login => run_login().await,
         Command::Ask { prompt } => run_ask(prompt).await,
-        Command::TacticSearch { resume } => autonomous::run_tactic_search_once(resume).await,
+        Command::TacticSearch { resume, file } => {
+            if let Some(file_path) = file {
+                autonomous::run_tactic_search_file(file_path).await
+            } else if let Some(session_id) = resume {
+                autonomous::run_tactic_search_once(session_id).await
+            } else {
+                bail!("tactic-search requires --resume <session_id> or --file <path.lean>")
+            }
+        }
         Command::Run {
             problem,
             label,
@@ -223,6 +232,7 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions> {
 
     if args.first().map(String::as_str) == Some("tactic-search") {
         let mut resume = None;
+        let mut file = None;
         let mut index = 1;
         while index < args.len() {
             match args[index].as_str() {
@@ -230,15 +240,19 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions> {
                     index += 1;
                     resume = args.get(index).cloned();
                 }
+                "--file" => {
+                    index += 1;
+                    file = args.get(index).cloned();
+                }
                 unexpected => bail!("unknown tactic-search argument: {unexpected}"),
             }
             index += 1;
         }
-        let Some(resume) = resume else {
-            bail!("openproof tactic-search requires --resume <session_id>");
-        };
+        if resume.is_none() && file.is_none() {
+            bail!("openproof tactic-search requires --resume <session_id> or --file <path.lean>");
+        }
         return Ok(CliOptions {
-            command: Command::TacticSearch { resume },
+            command: Command::TacticSearch { resume, file },
             launch_cwd,
         });
     }
