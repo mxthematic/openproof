@@ -1312,10 +1312,13 @@ pub async fn run_tactic_search_file(file_path: String) -> Result<()> {
     fs::create_dir_all(&workspace_dir)?;
     fs::write(workspace_dir.join("Main.lean"), &content)?;
 
-    // Build a session snapshot with just enough for tactic search
+    // Extract the type expression for the fallback goal
+    let type_expr = extract_type_expr_from_content(&content).unwrap_or_default();
+
     let mut node = openproof_protocol::ProofNode::default();
     node.id = "root".to_string();
     node.content = content.clone();
+    node.statement = type_expr;
     node.status = openproof_protocol::ProofNodeStatus::Pending;
     let mut proof = openproof_protocol::ProofSessionState::default();
     proof.nodes.push(node);
@@ -1794,10 +1797,21 @@ fn spawn_tactic_search_for_sorrys(
     }
 
     // Try Pantograph first (1000x faster), fall back to LSP
+    eprintln!(
+        "[tactic-search] Lean project dir: {}",
+        project_dir.display()
+    );
     let pantograph: Option<Arc<Mutex<openproof_lean::pantograph::Pantograph>>> =
-        openproof_lean::pantograph::Pantograph::spawn(&project_dir)
-            .map(|pg| Arc::new(Mutex::new(pg)))
-            .ok();
+        match openproof_lean::pantograph::Pantograph::spawn(&project_dir) {
+            Ok(pg) => {
+                eprintln!("[tactic-search] Pantograph spawned successfully");
+                Some(Arc::new(Mutex::new(pg)))
+            }
+            Err(e) => {
+                eprintln!("[tactic-search] Pantograph spawn failed: {e}");
+                None
+            }
+        };
 
     let lsp_mcp: Option<Arc<Mutex<LeanLspMcp>>> = if pantograph.is_none() {
         LeanLspMcp::spawn(&project_dir)
@@ -1822,11 +1836,19 @@ fn spawn_tactic_search_for_sorrys(
             .map(|(_, output)| output);
         let mut goals = Vec::new();
         for &(line, _col) in &sorry_positions {
-            let goal = verify_output
+            let mut goal = verify_output
                 .as_deref()
                 .map(|output| extract_goal_at_line(output, line))
                 .filter(|goal| !goal.trim().is_empty())
                 .unwrap_or_else(|| fallback_goal_type.clone());
+            // If goal is still empty, try extracting from the file content directly
+            if goal.trim().is_empty() {
+                goal = extract_type_expr_from_content(&full_content).unwrap_or_default();
+            }
+            eprintln!(
+                "[tactic-search] sorry line {line}: goal={:?}",
+                &goal[..goal.len().min(80)]
+            );
             goals.push((line, goal));
         }
         goals
@@ -2090,6 +2112,69 @@ fn emit_search_result(
 }
 
 /// Extract the goal type at a specific sorry line from Lean's error output.
+/// Extract a forall type expression from Lean file content containing a theorem with sorry.
+/// e.g. "theorem foo (n : Nat) : n + 0 = n := by\n  sorry" -> "forall (n : Nat), n + 0 = n"
+fn extract_type_expr_from_content(content: &str) -> Option<String> {
+    // Find ":= by" that precedes sorry
+    let by_idx = content.rfind(":= by")?;
+    let before = &content[..by_idx];
+
+    // Walk backwards to find "theorem", "lemma", or "def"
+    let mut kw_idx = None;
+    for kw in ["theorem ", "lemma ", "def "] {
+        if let Some(idx) = before.rfind(kw) {
+            if kw_idx.map_or(true, |prev| idx > prev) {
+                kw_idx = Some(idx);
+            }
+        }
+    }
+    let kw_idx = kw_idx?;
+
+    // Extract: skip "theorem name" to get just the signature
+    let after_kw = &content[kw_idx..by_idx];
+    // Skip keyword ("theorem ", "lemma ", "def ")
+    let after_keyword = after_kw
+        .trim_start_matches("theorem ")
+        .trim_start_matches("lemma ")
+        .trim_start_matches("def ");
+    // Skip the name (first non-whitespace word)
+    let after_name = after_keyword
+        .trim_start()
+        .find(|c: char| c.is_whitespace() || c == '(' || c == ':' || c == '[' || c == '{')
+        .map(|i| &after_keyword.trim_start()[i..])
+        .unwrap_or("");
+    let signature = after_name.trim();
+
+    // Find last top-level ":"
+    let mut depth = 0i32;
+    let mut colon_pos = None;
+    for (i, c) in signature.char_indices().rev() {
+        match c {
+            ')' | ']' | '}' => depth += 1,
+            '(' | '[' | '{' => depth -= 1,
+            ':' if depth == 0 => {
+                // Check not ":="
+                if signature[i..].starts_with(":=") {
+                    continue;
+                }
+                colon_pos = Some(i);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let colon_pos = colon_pos?;
+
+    let params = signature[..colon_pos].trim();
+    let conclusion = signature[colon_pos + 1..].trim();
+
+    if params.is_empty() {
+        Some(conclusion.to_string())
+    } else {
+        Some(format!("forall {params}, {conclusion}"))
+    }
+}
+
 fn extract_goal_at_line(lean_output: &str, target_line: usize) -> String {
     // Look for "unsolved goals" message near the target line
     let mut capturing = false;
