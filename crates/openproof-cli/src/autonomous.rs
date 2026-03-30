@@ -1804,7 +1804,6 @@ fn spawn_tactic_search_for_sorrys(
         let config = config.clone();
         let tactics = standard_tactics.clone();
         let store_for_propose = store.clone();
-        let proposer_backend = proposer_backend;
         let ollama = ollama_proposer.clone();
         let codex_model = codex_model.clone();
         let codex_cache = codex_cache.clone();
