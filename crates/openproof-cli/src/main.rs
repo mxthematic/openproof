@@ -28,6 +28,9 @@ enum Command {
     Ask {
         prompt: String,
     },
+    TacticSearch {
+        resume: String,
+    },
     Run {
         problem: String,
         label: Option<String>,
@@ -58,6 +61,7 @@ async fn main() -> Result<()> {
         Command::Health => run_health(options.launch_cwd).await,
         Command::Login => run_login().await,
         Command::Ask { prompt } => run_ask(prompt).await,
+        Command::TacticSearch { resume } => autonomous::run_tactic_search_once(resume).await,
         Command::Run {
             problem,
             label,
@@ -217,6 +221,28 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions> {
         });
     }
 
+    if args.first().map(String::as_str) == Some("tactic-search") {
+        let mut resume = None;
+        let mut index = 1;
+        while index < args.len() {
+            match args[index].as_str() {
+                "--resume" => {
+                    index += 1;
+                    resume = args.get(index).cloned();
+                }
+                unexpected => bail!("unknown tactic-search argument: {unexpected}"),
+            }
+            index += 1;
+        }
+        let Some(resume) = resume else {
+            bail!("openproof tactic-search requires --resume <session_id>");
+        };
+        return Ok(CliOptions {
+            command: Command::TacticSearch { resume },
+            launch_cwd,
+        });
+    }
+
     Ok(CliOptions {
         command: Command::Shell,
         launch_cwd,
@@ -233,6 +259,7 @@ Usage:
   openproof health
   openproof login
   openproof ask <prompt>
+  openproof tactic-search --resume <session_id>
   openproof run <problem> [--label <name>]
   openproof dashboard [--open] [--port <port>]
   openproof recluster-corpus

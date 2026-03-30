@@ -13,16 +13,92 @@ use crate::helpers::{
 use crate::turn_handling::{
     ensure_hidden_agent_branch, start_agent_branch_turn, start_branch_verification,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
+use directories::BaseDirs;
 use openproof_core::{AppEvent, AppState, AutonomousRunPatch};
 use openproof_lean::lsp_mcp::LeanLspMcp;
+use openproof_model::{CodexTurnRequest, TurnMessage};
 use openproof_protocol::{AgentRole, AgentStatus, BranchQueueState, SearchStrategy};
 use openproof_search::config::TacticSearchConfig;
 use openproof_search::lsp_search::best_first_search;
-use openproof_store::AppStore;
-use std::sync::{Arc, Mutex};
+use openproof_store::{AppStore, StorePaths};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tokio::sync::mpsc;
+
+const DEFAULT_CODEX_TACTIC_MODEL: &str = "gpt-5.4";
+const DEFAULT_CODEX_REASONING_EFFORT: &str = "low";
+const MAX_CODEX_TACTIC_CANDIDATES: usize = 3;
+
+static EXPERT_DATA_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TacticProposerBackend {
+    Standard,
+    Ollama,
+    Codex,
+}
+
+impl TacticProposerBackend {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Ollama => "ollama",
+            Self::Codex => "codex",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct CodexTacticResponse {
+    tactics: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ExpertExportContext {
+    session_id: String,
+    node_id: String,
+    node_label: String,
+    node_statement: String,
+    backend: String,
+    model: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ExpertPositiveRecord {
+    prompt: String,
+    completion: String,
+    goal_state: String,
+    step_index: usize,
+    session_id: String,
+    node_id: String,
+    node_label: String,
+    node_statement: String,
+    sorry_line: usize,
+    backend: String,
+    model: Option<String>,
+    created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ExpertTrajectoryRecord {
+    root_goal: String,
+    goals_before: Vec<String>,
+    tactics: Vec<String>,
+    session_id: String,
+    node_id: String,
+    node_label: String,
+    node_statement: String,
+    sorry_line: usize,
+    backend: String,
+    model: Option<String>,
+    created_at: String,
+}
 
 pub fn schedule_autonomous_tick(
     tx: mpsc::UnboundedSender<AppEvent>,
@@ -1131,6 +1207,409 @@ pub async fn drain_until_settled(
     }
 }
 
+pub async fn run_tactic_search_once(session_id: String) -> Result<()> {
+    let store = AppStore::open(StorePaths::detect()?)?;
+    let session = store
+        .get_session(&session_id)?
+        .with_context(|| format!("missing session {session_id}"))?;
+
+    let workspace_dir = store.workspace_dir(&session.id);
+    let mut full_content = String::new();
+    if let Ok(files) = store.list_workspace_files(&session.id) {
+        for (path, _) in &files {
+            if path.ends_with(".lean") && !path.contains("history/") {
+                if let Ok(content) = fs::read_to_string(workspace_dir.join(path)) {
+                    if !full_content.is_empty() {
+                        full_content.push_str("\n\n");
+                    }
+                    full_content.push_str(&content);
+                }
+            }
+        }
+    }
+    if full_content.trim().is_empty() {
+        full_content = session
+            .proof
+            .nodes
+            .first()
+            .map(|node| node.content.clone())
+            .unwrap_or_default();
+    }
+
+    let sorry_count = openproof_lean::find_sorry_positions(&full_content).len();
+    anyhow::ensure!(
+        sorry_count > 0,
+        "Session {session_id} has no sorrys in workspace or node content"
+    );
+
+    let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
+    eprintln!(
+        "[tactic-search] Running search for session {} with {} sorry goal(s)",
+        session.id, sorry_count
+    );
+    spawn_tactic_search_for_sorrys(tx, &session, &store);
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(240);
+    let mut completed = 0usize;
+    while completed < sorry_count {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        anyhow::ensure!(
+            !remaining.is_zero(),
+            "Timed out waiting for tactic search results for session {session_id}"
+        );
+        match tokio::time::timeout(remaining.min(Duration::from_secs(30)), rx.recv()).await {
+            Ok(Some(AppEvent::TacticSearchComplete {
+                sorry_line,
+                solved,
+                tactics,
+                remaining_goals,
+                search_outcome,
+                ..
+            })) => {
+                completed += 1;
+                eprintln!(
+                    "[tactic-search] line {sorry_line}: {search_outcome} (solved={solved}, remaining={:?}, tactics={})",
+                    remaining_goals,
+                    tactics.join("; ")
+                );
+            }
+            Ok(Some(AppEvent::ProofGoalUpdated(goal))) => {
+                if !goal.goal_text.trim().is_empty() {
+                    eprintln!(
+                        "[tactic-search] goal update: {}",
+                        goal.goal_text.lines().next().unwrap_or("")
+                    );
+                }
+            }
+            Ok(Some(_)) => {}
+            Ok(None) => break,
+            Err(_) => {}
+        }
+    }
+
+    anyhow::ensure!(
+        completed == sorry_count,
+        "Expected {sorry_count} tactic search result(s) for session {session_id}, received {completed}"
+    );
+    Ok(())
+}
+
+fn tactic_proposer_backend(config: Option<&crate::setup::SetupResult>) -> TacticProposerBackend {
+    if let Ok(value) = std::env::var("OPENPROOF_TACTIC_PROPOSER") {
+        let normalized = value.trim().to_ascii_lowercase();
+        return match normalized.as_str() {
+            "codex" => TacticProposerBackend::Codex,
+            "ollama" => TacticProposerBackend::Ollama,
+            "standard" | "fallback" | "none" => TacticProposerBackend::Standard,
+            _ => {
+                eprintln!(
+                    "[tactic-search] Unknown OPENPROOF_TACTIC_PROPOSER={value:?}; falling back to config"
+                );
+                tactic_proposer_backend_from_config(config)
+            }
+        };
+    }
+
+    tactic_proposer_backend_from_config(config)
+}
+
+fn tactic_proposer_backend_from_config(
+    config: Option<&crate::setup::SetupResult>,
+) -> TacticProposerBackend {
+    match config {
+        Some(cfg) if cfg.model_provider == "codex" => TacticProposerBackend::Codex,
+        Some(cfg) if cfg.prover_model.is_some() => TacticProposerBackend::Ollama,
+        _ => TacticProposerBackend::Standard,
+    }
+}
+
+fn codex_tactic_model() -> String {
+    std::env::var("OPENPROOF_TACTIC_MODEL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_CODEX_TACTIC_MODEL.to_string())
+}
+
+fn build_retrieval_context(hits: &[(String, String, String)]) -> String {
+    hits.iter()
+        .take(6)
+        .map(|(label, statement, _visibility)| format!("{label} : {statement}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn build_codex_tactic_prompt(goal: &str, retrieval_context: &str, max_candidates: usize) -> String {
+    let mut prompt = format!(
+        "Current Lean goal:\n{goal}\n\nReturn a compact JSON object of the form {{\"tactics\":[\"...\"]}} with up to {max_candidates} single-line Lean tactics."
+    );
+    if !retrieval_context.trim().is_empty() {
+        prompt.push_str("\n\nRelevant verified declarations:\n");
+        prompt.push_str(retrieval_context);
+    }
+    prompt
+}
+
+fn propose_codex_tactics(
+    model: &str,
+    goal: &str,
+    retrieval_context: &str,
+    max_candidates: usize,
+) -> Result<Vec<String>> {
+    if goal.trim().is_empty() || max_candidates == 0 {
+        return Ok(Vec::new());
+    }
+
+    let prompt = build_codex_tactic_prompt(goal, retrieval_context, max_candidates);
+    let messages = vec![
+        TurnMessage::chat(
+            "system",
+            "You are proposing Lean 4 tactics for OpenProof. Reply with strict JSON only. The response must be an object with a single key named tactics whose value is an array of single-line tactic strings. No markdown, no explanation, no code fences, and never emit sorry, admit, or native_decide.",
+        ),
+        TurnMessage::chat("user", prompt),
+    ];
+    let session_id = format!("tactic-search-{}", chrono::Utc::now().timestamp_millis());
+    let request = CodexTurnRequest {
+        session_id: &session_id,
+        messages: &messages,
+        model,
+        reasoning_effort: DEFAULT_CODEX_REASONING_EFFORT,
+        include_tools: false,
+    };
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("building Codex tactic runtime")?;
+    let response = runtime
+        .block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(30),
+                openproof_model::run_codex_turn(request),
+            )
+            .await
+        })
+        .context("Codex tactic proposal timed out")??;
+
+    Ok(parse_codex_tactics(&response)
+        .into_iter()
+        .filter_map(|tactic| filter_candidate_tactic(&tactic))
+        .take(max_candidates)
+        .collect())
+}
+
+fn parse_codex_tactics(response: &str) -> Vec<String> {
+    if let Some(parsed) = parse_codex_tactic_json(response) {
+        return parsed.tactics;
+    }
+
+    let trimmed = response.trim();
+    if let Some(stripped) = trimmed
+        .strip_prefix("```json")
+        .or_else(|| trimmed.strip_prefix("```"))
+    {
+        let inner = stripped.trim().trim_end_matches("```").trim();
+        if let Some(parsed) = parse_codex_tactic_json(inner) {
+            return parsed.tactics;
+        }
+    }
+
+    if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}')) {
+        if start < end {
+            if let Some(parsed) = parse_codex_tactic_json(&trimmed[start..=end]) {
+                return parsed.tactics;
+            }
+        }
+    }
+
+    trimmed
+        .lines()
+        .map(|line| {
+            line.trim()
+                .trim_start_matches('-')
+                .trim_start_matches('*')
+                .trim()
+                .trim_matches('"')
+                .to_string()
+        })
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+fn parse_codex_tactic_json(response: &str) -> Option<CodexTacticResponse> {
+    serde_json::from_str::<CodexTacticResponse>(response).ok()
+}
+
+fn filter_candidate_tactic(raw: &str) -> Option<String> {
+    let tactic = raw
+        .lines()
+        .next()
+        .unwrap_or(raw)
+        .trim()
+        .trim_end_matches(":::")
+        .trim()
+        .to_string();
+
+    if tactic.is_empty() {
+        return None;
+    }
+
+    let lower = tactic.to_ascii_lowercase();
+    for banned in ["sorry", "admit", "native_decide"] {
+        if lower == banned
+            || lower.starts_with(&format!("{banned} "))
+            || lower.starts_with(&format!("{banned};"))
+        {
+            return None;
+        }
+    }
+
+    if tactic.contains("?_") {
+        return None;
+    }
+
+    Some(tactic)
+}
+
+fn format_tactic_training_prompt(goal_state: &str) -> String {
+    format!("{goal_state}:::")
+}
+
+fn expert_data_dir() -> Result<PathBuf> {
+    let base_dirs = BaseDirs::new().context("could not resolve home directory")?;
+    Ok(base_dirs.home_dir().join(".openproof").join("expert-data"))
+}
+
+fn expert_data_write_lock() -> &'static Mutex<()> {
+    EXPERT_DATA_WRITE_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn append_jsonl_record<T: Serialize>(path: &Path, record: &T) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+
+    let _guard = expert_data_write_lock()
+        .lock()
+        .map_err(|e| anyhow::anyhow!("expert-data lock poisoned: {e}"))?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .with_context(|| format!("opening {}", path.display()))?;
+    let line = serde_json::to_string(record)?;
+    writeln!(file, "{line}").with_context(|| format!("writing {}", path.display()))?;
+    Ok(())
+}
+
+fn export_verified_tactic_examples(
+    pantograph: &Arc<Mutex<openproof_lean::pantograph::Pantograph>>,
+    export: &ExpertExportContext,
+    sorry_line: usize,
+    root_goal: &str,
+    tactics: &[String],
+) -> Result<usize> {
+    if root_goal.trim().is_empty() || tactics.is_empty() {
+        return Ok(0);
+    }
+
+    let export_dir = expert_data_dir()?;
+    let positives_path = export_dir.join("positives.jsonl");
+    let trajectories_path = export_dir.join("trajectories.jsonl");
+    let created_at = chrono::Utc::now().to_rfc3339();
+
+    let mut states_to_delete = Vec::new();
+    let (positive_records, goals_before) = {
+        let mut pg = pantograph
+            .lock()
+            .map_err(|e| anyhow::anyhow!("pantograph lock poisoned: {e}"))?;
+        if !pg.is_alive() {
+            anyhow::bail!("Pantograph process is not running");
+        }
+
+        let replay_result = (|| -> Result<(Vec<ExpertPositiveRecord>, Vec<String>)> {
+            let initial_state = pg
+                .start_goal(root_goal)?
+                .with_context(|| format!("goal.start failed for {root_goal}"))?;
+            states_to_delete.push(initial_state);
+
+            let mut current_state = initial_state;
+            let mut current_goal = root_goal.to_string();
+            let mut goals_before = Vec::with_capacity(tactics.len());
+            let mut positive_records = Vec::with_capacity(tactics.len());
+            for (step_index, tactic) in tactics.iter().enumerate() {
+                goals_before.push(current_goal.clone());
+                positive_records.push(ExpertPositiveRecord {
+                    prompt: format_tactic_training_prompt(&current_goal),
+                    completion: tactic.clone(),
+                    goal_state: current_goal.clone(),
+                    step_index,
+                    session_id: export.session_id.clone(),
+                    node_id: export.node_id.clone(),
+                    node_label: export.node_label.clone(),
+                    node_statement: export.node_statement.clone(),
+                    sorry_line,
+                    backend: export.backend.clone(),
+                    model: export.model.clone(),
+                    created_at: created_at.clone(),
+                });
+
+                let result = pg.try_tactic(current_state, 0, tactic)?;
+                if result.error.is_some() || result.new_state_id.is_none() {
+                    anyhow::bail!("replay failed for tactic {tactic:?}: {:?}", result.error);
+                }
+
+                current_state = result.new_state_id.unwrap();
+                states_to_delete.push(current_state);
+
+                if step_index + 1 == tactics.len() {
+                    if !result.remaining_goals.is_empty() {
+                        anyhow::bail!(
+                            "final tactic {tactic:?} did not close the goal; {} goals remain",
+                            result.remaining_goals.len()
+                        );
+                    }
+                } else {
+                    current_goal = result
+                        .remaining_goals
+                        .first()
+                        .cloned()
+                        .context("missing next goal while replaying solved trajectory")?;
+                }
+            }
+            Ok((positive_records, goals_before))
+        })();
+
+        for state_id in states_to_delete.iter().rev() {
+            let _ = pg.delete_goal(*state_id);
+        }
+
+        replay_result?
+    };
+
+    for record in &positive_records {
+        append_jsonl_record(&positives_path, record)?;
+    }
+
+    append_jsonl_record(
+        &trajectories_path,
+        &ExpertTrajectoryRecord {
+            root_goal: root_goal.to_string(),
+            goals_before,
+            tactics: tactics.to_vec(),
+            session_id: export.session_id.clone(),
+            node_id: export.node_id.clone(),
+            node_label: export.node_label.clone(),
+            node_statement: export.node_statement.clone(),
+            sorry_line,
+            backend: export.backend.clone(),
+            model: export.model.clone(),
+            created_at,
+        },
+    )?;
+
+    Ok(tactics.len())
+}
+
 /// Spawn best-first tactic search tasks for each sorry position in the active
 /// node's content. Each sorry gets its own search task, running in parallel
 /// with any agentic branches. Results come back as `TacticSearchComplete` events.
@@ -1140,6 +1619,23 @@ fn spawn_tactic_search_for_sorrys(
     store: &AppStore,
 ) {
     let node_id = session.proof.active_node_id.clone().unwrap_or_default();
+    let active_node = session.proof.nodes.iter().find(|node| node.id == node_id);
+    let node_label = active_node
+        .map(|node| node.label.clone())
+        .unwrap_or_default();
+    let node_statement = active_node
+        .map(|node| node.statement.clone())
+        .unwrap_or_default();
+    let fallback_goal_type = if !node_statement.trim().is_empty() {
+        node_statement.clone()
+    } else {
+        session
+            .proof
+            .accepted_target
+            .clone()
+            .or_else(|| session.proof.formal_target.clone())
+            .unwrap_or_default()
+    };
     let project_dir = crate::helpers::resolve_lean_project_dir();
     let workspace_dir = store.workspace_dir(&session.id);
 
@@ -1213,27 +1709,49 @@ fn spawn_tactic_search_for_sorrys(
     .map(String::from)
     .collect();
 
+    let setup_config = crate::setup::load_config();
+    let proposer_backend = tactic_proposer_backend(setup_config.as_ref());
+    let codex_model = if proposer_backend == TacticProposerBackend::Codex {
+        let _ = openproof_model::sync_auth_from_codex_cli();
+        Some(codex_tactic_model())
+    } else {
+        None
+    };
+    let codex_cache: Arc<Mutex<HashMap<String, Vec<String>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+
     // Check if a prover model is configured and available via ollama
-    let ollama_proposer = {
-        let proposer = if let Some(config) = crate::setup::load_config() {
-            if let Some(model_tag) = config.prover_model {
-                openproof_search::ollama::OllamaProposer::with_model(
-                    &model_tag,
-                    "http://localhost:11434",
-                )
-            } else {
-                openproof_search::ollama::OllamaProposer::new()
-            }
+    let ollama_proposer = if proposer_backend == TacticProposerBackend::Ollama {
+        let proposer = if let Some(model_tag) = setup_config
+            .as_ref()
+            .and_then(|config| config.prover_model.clone())
+        {
+            openproof_search::ollama::OllamaProposer::with_model(
+                &model_tag,
+                "http://localhost:11434",
+            )
         } else {
             openproof_search::ollama::OllamaProposer::new()
         };
         if proposer.is_available() {
-            eprintln!("[tactic-search] Prover model available via ollama");
-            Some(std::sync::Arc::new(proposer))
+            eprintln!("[tactic-search] Using ollama tactic proposer");
+            Some(Arc::new(proposer))
         } else {
+            eprintln!("[tactic-search] Ollama unavailable, using fallback tactics");
             None
         }
+    } else {
+        None
     };
+
+    if proposer_backend == TacticProposerBackend::Codex {
+        eprintln!(
+            "[tactic-search] Using Codex tactic proposer ({})",
+            codex_model.as_deref().unwrap_or(DEFAULT_CODEX_TACTIC_MODEL)
+        );
+    } else if proposer_backend == TacticProposerBackend::Standard {
+        eprintln!("[tactic-search] Using standard fallback tactics only");
+    }
 
     // Try Pantograph first (1000x faster), fall back to LSP
     let pantograph: Option<Arc<Mutex<openproof_lean::pantograph::Pantograph>>> =
@@ -1259,18 +1777,17 @@ fn spawn_tactic_search_for_sorrys(
     // Extract goal types for each sorry position (one compile, shared across all sorrys)
     let sorry_goals: Vec<(usize, String)> = if pantograph.is_some() {
         // Use lean to extract goal types at each sorry position
+        let verify_output = openproof_lean::tools::run_lean_verify_raw(&project_dir, &full_content)
+            .ok()
+            .map(|(_, output)| output);
         let mut goals = Vec::new();
         for &(line, _col) in &sorry_positions {
-            // Try to extract goal from Lean's error output
-            if let Ok((_, output)) =
-                openproof_lean::tools::run_lean_verify_raw(&project_dir, &full_content)
-            {
-                // Parse "unsolved goals" from output for this line
-                let goal = extract_goal_at_line(&output, line);
-                goals.push((line, goal));
-            } else {
-                goals.push((line, String::new()));
-            }
+            let goal = verify_output
+                .as_deref()
+                .map(|output| extract_goal_at_line(output, line))
+                .filter(|goal| !goal.trim().is_empty())
+                .unwrap_or_else(|| fallback_goal_type.clone());
+            goals.push((line, goal));
         }
         goals
     } else {
@@ -1287,33 +1804,101 @@ fn spawn_tactic_search_for_sorrys(
         let config = config.clone();
         let tactics = standard_tactics.clone();
         let store_for_propose = store.clone();
-
         let ollama = ollama_proposer.clone();
-        let propose_fn: openproof_search::search::ProposeFn =
-            Box::new(move |goal: &str, _context: &str, k: usize| {
+        let codex_model = codex_model.clone();
+        let codex_cache = codex_cache.clone();
+        let export = ExpertExportContext {
+            session_id: session.id.clone(),
+            node_id: node_id.clone(),
+            node_label: node_label.clone(),
+            node_statement: node_statement.clone(),
+            backend: proposer_backend.as_str().to_string(),
+            model: codex_model.clone(),
+        };
+        let propose_fn: openproof_search::search::ProposeFn = Box::new(
+            move |goal: &str, _context: &str, k: usize| {
                 let mut candidates: Vec<String> = Vec::new();
+                let hits = if goal.is_empty() {
+                    Vec::new()
+                } else {
+                    store_for_propose
+                        .search_verified_corpus(goal, 8)
+                        .unwrap_or_default()
+                };
+                let retrieval_context = build_retrieval_context(&hits);
 
-                // 1. Model-based tactics (if prover model available)
-                if let Some(ref proposer) = ollama {
-                    if let Ok(model_tactics) = proposer.propose_tactics(goal, k) {
-                        candidates.extend(model_tactics);
+                // 1. Model-based tactics
+                match proposer_backend {
+                    TacticProposerBackend::Codex => {
+                        let model_budget = k.min(MAX_CODEX_TACTIC_CANDIDATES);
+                        if model_budget > 0 {
+                            let cached = codex_cache
+                                .lock()
+                                .ok()
+                                .and_then(|cache| cache.get(goal).cloned());
+                            let model_tactics = if let Some(cached) = cached {
+                                cached
+                            } else if let Some(model) = codex_model.as_deref() {
+                                match propose_codex_tactics(
+                                    model,
+                                    goal,
+                                    &retrieval_context,
+                                    model_budget,
+                                ) {
+                                    Ok(model_tactics) => {
+                                        if let Ok(mut cache) = codex_cache.lock() {
+                                            cache.insert(goal.to_string(), model_tactics.clone());
+                                        }
+                                        model_tactics
+                                    }
+                                    Err(error) => {
+                                        eprintln!(
+                                            "[tactic-search] Codex proposal failed for goal {:?}: {error}",
+                                            goal.lines().next().unwrap_or("")
+                                        );
+                                        Vec::new()
+                                    }
+                                }
+                            } else {
+                                Vec::new()
+                            };
+                            candidates.extend(model_tactics.into_iter().take(model_budget));
+                        }
                     }
+                    TacticProposerBackend::Ollama => {
+                        if let Some(ref proposer) = ollama {
+                            if let Ok(model_tactics) = proposer.propose_tactics(goal, k) {
+                                candidates.extend(model_tactics);
+                            }
+                        }
+                    }
+                    TacticProposerBackend::Standard => {}
                 }
 
                 // 2. Corpus-based tactics (premise retrieval)
-                if !goal.is_empty() && candidates.len() < k {
-                    if let Ok(hits) = store_for_propose.search_verified_corpus(goal, 8) {
-                        for (label, _statement, _vis) in &hits {
-                            candidates.push(format!("exact {label}"));
-                            candidates.push(format!("apply {label}"));
-                            candidates.push(format!("rw [{label}]"));
+                if !hits.is_empty() && candidates.len() < k {
+                    let mut seen: HashSet<String> = candidates.iter().cloned().collect();
+                    for (label, _statement, _vis) in &hits {
+                        for tactic in [
+                            format!("exact {label}"),
+                            format!("apply {label}"),
+                            format!("rw [{label}]"),
+                        ] {
+                            if candidates.len() >= k {
+                                break;
+                            }
+                            if seen.insert(tactic.clone()) {
+                                candidates.push(tactic);
+                            }
+                        }
+                        if candidates.len() >= k {
+                            break;
                         }
                     }
                 }
 
                 // 3. Standard automation tactics as fallback
-                let mut seen: std::collections::HashSet<String> =
-                    candidates.iter().cloned().collect();
+                let mut seen: HashSet<String> = candidates.iter().cloned().collect();
                 for t in &tactics {
                     if candidates.len() >= k {
                         break;
@@ -1325,13 +1910,15 @@ fn spawn_tactic_search_for_sorrys(
 
                 candidates.truncate(k);
                 Ok(candidates)
-            });
+            },
+        );
 
         // Prefer Pantograph path (3ms per tactic)
         if let Some(ref pg) = pantograph {
             if !goal_type.is_empty() {
                 let pg = pg.clone();
                 let goal_type = goal_type.clone();
+                let export = export.clone();
                 tokio::task::spawn_blocking(move || {
                     eprintln!(
                         "[tactic-search] Pantograph search at line {line}: {}",
@@ -1351,7 +1938,29 @@ fn spawn_tactic_search_for_sorrys(
                         &config,
                         Some(&on_goal),
                     ) {
-                        Ok(result) => emit_search_result(&tx, &node_id, line, result),
+                        Ok(result) => {
+                            if let openproof_search::config::SearchResult::Solved {
+                                tactics, ..
+                            } = &result
+                            {
+                                match export_verified_tactic_examples(
+                                    &pg, &export, line, &goal_type, tactics,
+                                ) {
+                                    Ok(exported) if exported > 0 => {
+                                        eprintln!(
+                                            "[tactic-search] Exported {exported} verified tactic examples"
+                                        );
+                                    }
+                                    Ok(_) => {}
+                                    Err(error) => {
+                                        eprintln!(
+                                            "[tactic-search] Verified export failed at line {line}: {error}"
+                                        );
+                                    }
+                                }
+                            }
+                            emit_search_result(&tx, &node_id, line, result)
+                        }
                         Err(e) => eprintln!("[tactic-search] Pantograph error at line {line}: {e}"),
                     }
                 });
