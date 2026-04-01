@@ -590,9 +590,24 @@ pub async fn run_autonomous(
             crate::autonomous::spawn_tactic_search_for_sorrys(tx_bfs, &session, &store_bfs);
         })
         .await;
-        // Drain events and check for TacticSearchComplete with solved=true.
+        // Wait for TacticSearchComplete events (search runs on background threads).
         let mut bfs_solved = false;
-        while let Ok(event) = rx.try_recv() {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(240);
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            let event = match tokio::time::timeout(
+                remaining.min(std::time::Duration::from_secs(5)),
+                rx.recv(),
+            )
+            .await
+            {
+                Ok(Some(e)) => e,
+                Ok(None) => break,
+                Err(_) => break, // timeout waiting for event
+            };
             match &event {
                 AppEvent::TacticSearchComplete {
                     solved, tactics, ..
