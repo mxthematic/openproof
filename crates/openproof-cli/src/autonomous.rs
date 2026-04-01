@@ -1764,8 +1764,6 @@ pub fn spawn_tactic_search_for_sorrys(
         "grind",
         "decide",
         "trivial",
-        "exact?",
-        "apply?",
         "simp_all",
         "tauto",
         "contradiction",
