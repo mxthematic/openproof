@@ -140,7 +140,7 @@ impl OllamaProposer {
 }
 
 /// Filter out banned tactics and clean up model output.
-fn filter_tactic(raw: &str) -> Option<String> {
+pub fn filter_tactic(raw: &str) -> Option<String> {
     let tactic = raw
         .lines()
         .next()
