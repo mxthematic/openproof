@@ -105,6 +105,20 @@ pub async fn run_autonomous(
         }
     }
 
+    // Override search strategy via env var (for benchmarking).
+    if let Ok(strategy) = std::env::var("OPENPROOF_SEARCH_STRATEGY") {
+        let s = match strategy.to_ascii_lowercase().as_str() {
+            "tactic" | "tactic_search" | "bfs" => openproof_protocol::SearchStrategy::TacticSearch,
+            "agentic" | "agent" => openproof_protocol::SearchStrategy::Agentic,
+            "hybrid" => openproof_protocol::SearchStrategy::Hybrid,
+            _ => openproof_protocol::SearchStrategy::Hybrid,
+        };
+        if let Some(session) = state.current_session_mut() {
+            session.proof.search_strategy = s;
+        }
+        eprintln!("[run] Search strategy override: {strategy}");
+    }
+
     // Load auth
     eprintln!("[run] Loading auth...");
     match sync_auth_from_codex_cli() {
