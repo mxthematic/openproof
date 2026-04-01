@@ -42,6 +42,7 @@ enum TacticProposerBackend {
     Standard,
     Ollama,
     Codex,
+    Mlx,
 }
 
 impl TacticProposerBackend {
@@ -50,6 +51,7 @@ impl TacticProposerBackend {
             Self::Standard => "standard",
             Self::Ollama => "ollama",
             Self::Codex => "codex",
+            Self::Mlx => "mlx",
         }
     }
 }
@@ -1345,6 +1347,7 @@ fn tactic_proposer_backend(config: Option<&crate::setup::SetupResult>) -> Tactic
         return match normalized.as_str() {
             "codex" => TacticProposerBackend::Codex,
             "ollama" => TacticProposerBackend::Ollama,
+            "mlx" => TacticProposerBackend::Mlx,
             "standard" | "fallback" | "none" => TacticProposerBackend::Standard,
             _ => {
                 eprintln!(
@@ -1361,6 +1364,10 @@ fn tactic_proposer_backend(config: Option<&crate::setup::SetupResult>) -> Tactic
 fn tactic_proposer_backend_from_config(
     config: Option<&crate::setup::SetupResult>,
 ) -> TacticProposerBackend {
+    // Auto-detect MLX on macOS if model is installed.
+    if cfg!(target_os = "macos") && openproof_search::mlx::mlx_model_exists() {
+        return TacticProposerBackend::Mlx;
+    }
     match config {
         Some(cfg) if cfg.model_provider == "codex" => TacticProposerBackend::Codex,
         Some(cfg) if cfg.prover_model.is_some() => TacticProposerBackend::Ollama,
@@ -1789,6 +1796,60 @@ fn spawn_tactic_search_for_sorrys(
         None
     };
 
+    // Check if MLX tactic model is available (macOS Apple Silicon).
+    let mlx_proposer = if proposer_backend == TacticProposerBackend::Mlx {
+        let proposer = openproof_search::mlx::MlxProposer::new();
+        if proposer.is_available() {
+            eprintln!("[tactic-search] Using MLX tactic proposer (already running)");
+            Some(Arc::new(proposer))
+        } else {
+            // Auto-spawn mlx_lm.server.
+            eprintln!("[tactic-search] Spawning MLX server...");
+            let port = proposer.port();
+            let model_path = proposer.model_path().to_string();
+            match std::process::Command::new("python3")
+                .args([
+                    "-m",
+                    "mlx_lm.server",
+                    "--model",
+                    &model_path,
+                    "--port",
+                    &port.to_string(),
+                ])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+            {
+                Ok(_child) => {
+                    // Poll for readiness (up to 30s).
+                    let mut ready = false;
+                    for _ in 0..60 {
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        if proposer.is_available() {
+                            ready = true;
+                            break;
+                        }
+                    }
+                    if ready {
+                        eprintln!("[tactic-search] MLX server ready");
+                        Some(Arc::new(proposer))
+                    } else {
+                        eprintln!(
+                            "[tactic-search] MLX server failed to start, using fallback tactics"
+                        );
+                        None
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[tactic-search] Failed to spawn MLX server: {e}");
+                    None
+                }
+            }
+        }
+    } else {
+        None
+    };
+
     if proposer_backend == TacticProposerBackend::Codex {
         eprintln!(
             "[tactic-search] Using Codex tactic proposer ({})",
@@ -1869,6 +1930,7 @@ fn spawn_tactic_search_for_sorrys(
         let tactics = standard_tactics.clone();
         let store_for_propose = store.clone();
         let ollama = ollama_proposer.clone();
+        let mlx = mlx_proposer.clone();
         let codex_model = codex_model.clone();
         let codex_cache = codex_cache.clone();
         let export = ExpertExportContext {
@@ -1931,6 +1993,13 @@ fn spawn_tactic_search_for_sorrys(
                     }
                     TacticProposerBackend::Ollama => {
                         if let Some(ref proposer) = ollama {
+                            if let Ok(model_tactics) = proposer.propose_tactics(goal, k) {
+                                candidates.extend(model_tactics);
+                            }
+                        }
+                    }
+                    TacticProposerBackend::Mlx => {
+                        if let Some(ref proposer) = mlx {
                             if let Ok(model_tactics) = proposer.propose_tactics(goal, k) {
                                 candidates.extend(model_tactics);
                             }
