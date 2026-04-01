@@ -278,8 +278,11 @@ pub(crate) fn verify_scratch(
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let sorry_placeholder = contains_sorry_placeholder(&stdout, &stderr);
+    // Also check the source for sorry as a standalone tactic/term.
+    // Lean may not always emit a warning (e.g., when sorry is inside a def).
+    let source_has_sorry = source_contains_sorry(&rendered_scratch);
     Ok(LeanVerificationSummary {
-        ok: output.status.success() && !sorry_placeholder,
+        ok: output.status.success() && !sorry_placeholder && !source_has_sorry,
         code: output.status.code(),
         stdout: stdout.clone(),
         stderr: if !stderr.trim().is_empty() {
@@ -309,6 +312,38 @@ pub(crate) fn write_temp_scratch(rendered_scratch: &str) -> Result<PathBuf> {
     fs::write(&scratch_path, rendered_scratch)
         .with_context(|| format!("writing {}", scratch_path.display()))?;
     Ok(scratch_path)
+}
+
+/// Check if the Lean source contains `sorry` as a tactic or term
+/// (not just inside comments or strings).
+fn source_contains_sorry(source: &str) -> bool {
+    for line in source.lines() {
+        let trimmed = line.trim();
+        // Skip comment lines.
+        if trimmed.starts_with("--") || trimmed.starts_with("/-") {
+            continue;
+        }
+        // Strip inline comments.
+        let code = trimmed.split("--").next().unwrap_or(trimmed);
+        // Check for sorry as a word boundary (not part of another identifier).
+        if code.contains("sorry") {
+            // Make sure it's not inside a string or part of a longer identifier.
+            for (i, _) in code.match_indices("sorry") {
+                let before = if i > 0 { code.as_bytes()[i - 1] } else { b' ' };
+                let after = if i + 5 < code.len() {
+                    code.as_bytes()[i + 5]
+                } else {
+                    b' '
+                };
+                let before_ok = !before.is_ascii_alphanumeric() && before != b'_';
+                let after_ok = !after.is_ascii_alphanumeric() && after != b'_';
+                if before_ok && after_ok {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 fn failed_result(

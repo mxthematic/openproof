@@ -501,6 +501,12 @@ pub async fn run_autonomous(
                 .and_then(|r| r.ok());
 
                 if let Some(result) = result {
+                    eprintln!(
+                        "[run] Verify: ok={}, sorry={:?}, stderr={}",
+                        result.ok,
+                        result.error,
+                        result.stderr.chars().take(200).collect::<String>()
+                    );
                     if result.ok {
                         eprintln!("[run] *** DIRECT VERIFICATION SUCCEEDED ***");
                         let sr = store.clone();
