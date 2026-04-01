@@ -1375,6 +1375,20 @@ fn tactic_proposer_backend_from_config(
     }
 }
 
+/// Find the Python executable for running mlx_lm.server.
+/// Prefers the managed venv at ~/.openproof/mlx-env/, falls back to system python3.
+fn mlx_python_path() -> String {
+    let home = directories::BaseDirs::new()
+        .map(|d| d.home_dir().to_path_buf())
+        .unwrap_or_default();
+    let venv_python = home.join(".openproof/mlx-env/bin/python3");
+    if venv_python.exists() {
+        venv_python.display().to_string()
+    } else {
+        "python3".to_string()
+    }
+}
+
 fn codex_tactic_model() -> String {
     std::env::var("OPENPROOF_TACTIC_MODEL")
         .ok()
@@ -1803,11 +1817,12 @@ fn spawn_tactic_search_for_sorrys(
             eprintln!("[tactic-search] Using MLX tactic proposer (already running)");
             Some(Arc::new(proposer))
         } else {
-            // Auto-spawn mlx_lm.server.
+            // Auto-spawn mlx_lm.server using the managed venv.
             eprintln!("[tactic-search] Spawning MLX server...");
             let port = proposer.port();
             let model_path = proposer.model_path().to_string();
-            match std::process::Command::new("python3")
+            let python = mlx_python_path();
+            match std::process::Command::new(&python)
                 .args([
                     "-m",
                     "mlx_lm.server",
