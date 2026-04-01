@@ -2041,7 +2041,20 @@ pub fn spawn_tactic_search_for_sorrys(
                     TacticProposerBackend::Standard => {}
                 }
 
-                // 2. Corpus-based tactics (premise retrieval)
+                // 2. Standard automation tactics (most important for BFS).
+                //    These come before corpus hits because intro/simp/nlinarith
+                //    are far more likely to work than exact/apply with lemma names.
+                let mut seen: HashSet<String> = candidates.iter().cloned().collect();
+                for t in &tactics {
+                    if candidates.len() >= k {
+                        break;
+                    }
+                    if seen.insert(t.clone()) {
+                        candidates.push(t.clone());
+                    }
+                }
+
+                // 3. Corpus-based tactics (premise retrieval) -- after standard tactics.
                 if !hits.is_empty() && candidates.len() < k {
                     let mut seen: HashSet<String> = candidates.iter().cloned().collect();
                     for (label, _statement, _vis) in &hits {
@@ -2060,17 +2073,6 @@ pub fn spawn_tactic_search_for_sorrys(
                         if candidates.len() >= k {
                             break;
                         }
-                    }
-                }
-
-                // 3. Standard automation tactics as fallback
-                let mut seen: HashSet<String> = candidates.iter().cloned().collect();
-                for t in &tactics {
-                    if candidates.len() >= k {
-                        break;
-                    }
-                    if seen.insert(t.clone()) {
-                        candidates.push(t.clone());
                     }
                 }
 

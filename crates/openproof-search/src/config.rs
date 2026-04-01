@@ -26,8 +26,8 @@ pub struct TacticSearchConfig {
 impl Default for TacticSearchConfig {
     fn default() -> Self {
         Self {
-            beam_width: 8,
-            max_expansions: 200,
+            beam_width: 32,
+            max_expansions: 500,
             timeout: Duration::from_secs(120),
             dedup: true,
             max_depth: 20,

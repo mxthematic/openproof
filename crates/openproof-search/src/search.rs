@@ -200,8 +200,17 @@ pub fn pantograph_best_first_search(
             expansions += 1;
 
             if result.error.is_some() || result.new_state_id.is_none() {
+                eprintln!(
+                    "  [bfs] tactic {tactic:?} FAILED: {:?}",
+                    result.error.as_deref().unwrap_or("no state")
+                );
                 continue; // tactic failed
             }
+            eprintln!(
+                "  [bfs] tactic {tactic:?} OK: {} remaining goals, state={}",
+                result.remaining_goals.len(),
+                result.new_state_id.unwrap_or(0)
+            );
 
             let new_state_id = result.new_state_id.unwrap();
             allocated_states.push(new_state_id);
