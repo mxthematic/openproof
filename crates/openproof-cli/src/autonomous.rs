@@ -1752,11 +1752,14 @@ pub fn spawn_tactic_search_for_sorrys(
 
     // Standard tactics for the propose_fn callback (used as fallback)
     let standard_tactics: Vec<String> = vec![
+        "intro",
+        "intros",
         "simp",
         "omega",
         "ring",
         "norm_num",
         "linarith",
+        "nlinarith",
         "aesop",
         "grind",
         "decide",
@@ -1773,10 +1776,10 @@ pub fn spawn_tactic_search_for_sorrys(
         "field_simp",
         "push_cast",
         "ring_nf",
-        "nlinarith",
         "norm_num [*]",
         "simp [*]",
         "grind?",
+        "nlinarith [sq_nonneg _]",
     ]
     .into_iter()
     .map(String::from)
