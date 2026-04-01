@@ -3,6 +3,7 @@ mod autonomous_headless;
 #[allow(dead_code)]
 mod decomposition;
 mod event_loop;
+mod expert_gen;
 mod export;
 mod helpers;
 mod key_handling;
@@ -38,6 +39,7 @@ enum Command {
         label: Option<String>,
         resume: Option<String>,
     },
+    ExpertGen,
     Dashboard {
         open: bool,
         port: Option<u16>,
@@ -61,6 +63,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Command::Health => run_health(options.launch_cwd).await,
+        Command::ExpertGen => expert_gen::run_expert_gen().await,
         Command::Login => run_login().await,
         Command::Ask { prompt } => run_ask(prompt).await,
         Command::TacticSearch { resume, file } => {
@@ -142,6 +145,13 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions> {
     {
         return Ok(CliOptions {
             command: Command::ReclusterCorpus,
+            launch_cwd,
+        });
+    }
+
+    if args.first().map(String::as_str) == Some("expert-gen") {
+        return Ok(CliOptions {
+            command: Command::ExpertGen,
             launch_cwd,
         });
     }

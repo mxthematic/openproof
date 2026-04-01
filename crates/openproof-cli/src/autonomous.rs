@@ -287,14 +287,22 @@ pub fn run_autonomous_step(
     // If any node has content but hasn't been verified, verify it now
     // before doing anything else. This closes the loop after tool turns
     // write code via file_write + lean_verify succeeds in the tool loop.
-    let unverified_with_content = latest_session.proof.nodes.iter().find(|n| {
-        !n.content.trim().is_empty()
-            && matches!(
-                n.status,
-                openproof_protocol::ProofNodeStatus::Pending
-                    | openproof_protocol::ProofNodeStatus::Proving
-            )
-    });
+    // In pure TacticSearch mode, skip the verify-first check and go straight
+    // to tactic search. The verify-first path is for agentic mode where the
+    // LLM may have written a complete proof.
+    let strategy = latest_session.proof.search_strategy;
+    let unverified_with_content = if strategy == SearchStrategy::TacticSearch {
+        None
+    } else {
+        latest_session.proof.nodes.iter().find(|n| {
+            !n.content.trim().is_empty()
+                && matches!(
+                    n.status,
+                    openproof_protocol::ProofNodeStatus::Pending
+                        | openproof_protocol::ProofNodeStatus::Proving
+                )
+        })
+    };
     if let Some(unode) = unverified_with_content {
         eprintln!(
             "[auto] Found unverified node '{}' with content, spawning verification...",
@@ -727,7 +735,6 @@ pub fn run_autonomous_step(
         }
 
         // Spawn tactic search in parallel with the agentic repair (if strategy allows).
-        let strategy = latest_session.proof.search_strategy;
         if matches!(
             strategy,
             SearchStrategy::Hybrid | SearchStrategy::TacticSearch
@@ -1679,7 +1686,7 @@ fn export_verified_tactic_examples(
 /// Spawn best-first tactic search tasks for each sorry position in the active
 /// node's content. Each sorry gets its own search task, running in parallel
 /// with any agentic branches. Results come back as `TacticSearchComplete` events.
-fn spawn_tactic_search_for_sorrys(
+pub fn spawn_tactic_search_for_sorrys(
     tx: mpsc::UnboundedSender<AppEvent>,
     session: &openproof_protocol::SessionSnapshot,
     store: &AppStore,
@@ -1925,7 +1932,7 @@ fn spawn_tactic_search_for_sorrys(
             }
             eprintln!(
                 "[tactic-search] sorry line {line}: goal={:?}",
-                &goal[..goal.len().min(80)]
+                goal.chars().take(80).collect::<String>()
             );
             goals.push((line, goal));
         }

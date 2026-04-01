@@ -4,7 +4,15 @@
 //! The TUI-driven step functions (`schedule_autonomous_tick`,
 //! `run_autonomous_step`) live in `autonomous.rs`.
 
-use crate::autonomous::{drain_until_settled, run_autonomous_step};
+use crate::autonomous::{drain_until_settled, run_autonomous_step, spawn_tactic_search_for_sorrys};
+
+/// Quick check if source code contains sorry as a tactic.
+fn source_contains_sorry_check(content: &str) -> bool {
+    content.lines().any(|line| {
+        let trimmed = line.trim();
+        !trimmed.starts_with("--") && trimmed.contains("sorry")
+    })
+}
 use crate::helpers::{extract_lean_blocks_from_text, persist_write, resolve_lean_project_dir};
 use crate::system_prompt::build_turn_messages_with_retrieval;
 use crate::turn_handling::run_agentic_loop;
@@ -562,6 +570,37 @@ pub async fn run_autonomous(
             }
             eprintln!("[run] Direct verification did not succeed. Entering autonomous loop.");
         }
+    }
+
+    // For pure BFS mode, run tactic search directly and skip the autonomous loop.
+    let is_bfs_mode = state
+        .current_session()
+        .map(|s| s.proof.search_strategy == openproof_protocol::SearchStrategy::TacticSearch)
+        .unwrap_or(false);
+    if is_bfs_mode {
+        eprintln!("\n[run] === Running pure BFS tactic search ===\n");
+        let session = state.current_session().cloned().unwrap();
+        crate::autonomous::spawn_tactic_search_for_sorrys(tx.clone(), &session, &store);
+        // Drain all events from the search.
+        drain_until_settled(tx.clone(), store.clone(), &mut state, &mut rx).await;
+        // Check if solved.
+        let session = state.current_session().cloned().unwrap();
+        let all_verified = !session.proof.nodes.is_empty()
+            && session.proof.nodes.iter().all(|n| {
+                n.status == openproof_protocol::ProofNodeStatus::Verified
+                    && !source_contains_sorry_check(&n.content)
+            });
+        if all_verified {
+            eprintln!("[run] All proof nodes verified via BFS!");
+        } else {
+            eprintln!("[run] BFS tactic search did not fully solve the proof.");
+        }
+        // Save and return (skip autonomous loop).
+        if let Some(session) = state.current_session().cloned() {
+            let s = store.clone();
+            let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
+        }
+        return Ok(());
     }
 
     // Start autonomous loop in full mode (never stops until all nodes verified)
