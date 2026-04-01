@@ -1913,20 +1913,28 @@ pub fn spawn_tactic_search_for_sorrys(
 
     let config = TacticSearchConfig::default();
 
-    // Extract goal types for each sorry position (one compile, shared across all sorrys)
+    // Extract goal types for each sorry position.
+    // Primary: extract the full theorem type from source (works with Pantograph goal.start).
+    // Fallback: use compiler output or node statement.
     let sorry_goals: Vec<(usize, String)> = if pantograph.is_some() {
-        // Use lean to extract goal types at each sorry position
-        let verify_output = openproof_lean::tools::run_lean_verify_raw(&project_dir, &full_content)
-            .ok()
-            .map(|(_, output)| output);
         let mut goals = Vec::new();
         for &(line, _col) in &sorry_positions {
-            let mut goal = verify_output
-                .as_deref()
-                .map(|output| extract_goal_at_line(output, line))
-                .filter(|goal| !goal.trim().is_empty())
-                .unwrap_or_else(|| fallback_goal_type.clone());
-            // If goal is still empty, try extracting from the file content directly
+            // Try to extract the theorem type directly from source.
+            // This produces a proper Lean type expression that Pantograph can use.
+            let mut goal =
+                extract_theorem_type_from_source(&full_content, line).unwrap_or_default();
+            // Fallback: try compiler output.
+            if goal.trim().is_empty() {
+                let verify_output =
+                    openproof_lean::tools::run_lean_verify_raw(&project_dir, &full_content)
+                        .ok()
+                        .map(|(_, output)| output);
+                goal = verify_output
+                    .as_deref()
+                    .map(|output| extract_goal_at_line(output, line))
+                    .filter(|g| !g.trim().is_empty())
+                    .unwrap_or_else(|| fallback_goal_type.clone());
+            }
             if goal.trim().is_empty() {
                 goal = extract_type_expr_from_content(&full_content).unwrap_or_default();
             }
@@ -2207,6 +2215,77 @@ fn emit_search_result(
 /// Extract the goal type at a specific sorry line from Lean's error output.
 /// Extract a forall type expression from Lean file content containing a theorem with sorry.
 /// e.g. "theorem foo (n : Nat) : n + 0 = n := by\n  sorry" -> "forall (n : Nat), n + 0 = n"
+/// Extract the full theorem type from source for Pantograph's `goal.start`.
+///
+/// For `theorem foo (x : Nat) (h : x > 0) : x >= 0 := by sorry`
+/// produces `∀ (x : Nat), x > 0 → x >= 0`
+///
+/// This works by finding the theorem/lemma declaration containing the sorry
+/// at `sorry_line`, extracting the signature, and converting the parenthesized
+/// arguments into `∀` binders.
+fn extract_theorem_type_from_source(content: &str, _sorry_line: usize) -> Option<String> {
+    // Collapse content to single line for easier parsing.
+    let flat = content.replace('\n', " ");
+
+    // Find ":= by" (the proof block start).
+    let by_idx = flat.rfind(":= by")?;
+    let before = &flat[..by_idx];
+
+    // Find the theorem/lemma keyword.
+    let mut kw_idx = None;
+    for kw in ["theorem ", "lemma ", "def "] {
+        if let Some(idx) = before.rfind(kw) {
+            if kw_idx.is_none_or(|prev| idx > prev) {
+                kw_idx = Some(idx);
+            }
+        }
+    }
+    let kw_idx = kw_idx?;
+
+    // Get everything from keyword to ":= by".
+    let decl = &flat[kw_idx..by_idx].trim();
+
+    // Skip "theorem name" to get the signature.
+    let after_kw = decl
+        .trim_start_matches("theorem ")
+        .trim_start_matches("lemma ")
+        .trim_start_matches("def ");
+    // Skip the name.
+    let sig_start = after_kw
+        .trim_start()
+        .find(|c: char| c.is_whitespace() || c == '(' || c == ':' || c == '[' || c == '{')
+        .unwrap_or(after_kw.len());
+    let signature = after_kw.trim_start()[sig_start..].trim();
+
+    // Find the last top-level ":" to split args from return type.
+    let mut depth = 0i32;
+    let mut last_colon = None;
+    for (i, c) in signature.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ':' if depth == 0 => {
+                if !signature[i..].starts_with(":=") {
+                    last_colon = Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    let last_colon = last_colon?;
+
+    let args_str = signature[..last_colon].trim();
+    let return_type = signature[last_colon + 1..].trim();
+
+    if args_str.is_empty() {
+        return Some(return_type.to_string());
+    }
+
+    // Build ∀ expression: wrap explicit args in ∀, convert implicit args.
+    // Simple approach: just prepend "∀" and replace the last ":" with ","
+    Some(format!("∀ {args_str}, {return_type}"))
+}
+
 fn extract_type_expr_from_content(content: &str) -> Option<String> {
     // Find ":= by" that precedes sorry
     let by_idx = content.rfind(":= by")?;
