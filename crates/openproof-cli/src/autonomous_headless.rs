@@ -580,7 +580,12 @@ pub async fn run_autonomous(
     if is_bfs_mode {
         eprintln!("\n[run] === Running pure BFS tactic search ===\n");
         let session = state.current_session().cloned().unwrap();
-        crate::autonomous::spawn_tactic_search_for_sorrys(tx.clone(), &session, &store);
+        let tx_bfs = tx.clone();
+        let store_bfs = store.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            crate::autonomous::spawn_tactic_search_for_sorrys(tx_bfs, &session, &store_bfs);
+        })
+        .await;
         // Drain all events from the search.
         drain_until_settled(tx.clone(), store.clone(), &mut state, &mut rx).await;
         // Check if solved.
