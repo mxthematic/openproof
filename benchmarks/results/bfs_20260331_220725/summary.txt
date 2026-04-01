@@ -1,0 +1,8 @@
+TIMEOUT 120 mathd_algebra_107
+TIMEOUT 120 mathd_algebra_113
+TIMEOUT 121 mathd_algebra_114
+FAILED 101 mathd_algebra_125
+FAILED 90 mathd_algebra_129
+FAILED 80 mathd_algebra_137
+FAILED 97 mathd_algebra_139
+FAILED 112 mathd_algebra_141

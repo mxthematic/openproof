@@ -422,8 +422,12 @@ pub async fn run_autonomous(
     }
 
     // Direct verification: check workspace files for compilable lean code.
-    // Skip when resuming -- the existing code already verified, we want to push further.
-    if resume.is_none() {
+    // Skip in BFS mode (we know it has sorry) and when resuming.
+    let is_bfs_early = state
+        .current_session()
+        .map(|s| s.proof.search_strategy == openproof_protocol::SearchStrategy::TacticSearch)
+        .unwrap_or(false);
+    if !is_bfs_early && resume.is_none() {
         let session = state.current_session().cloned().unwrap();
 
         // Read workspace .lean files directly (source of truth)
@@ -586,16 +590,30 @@ pub async fn run_autonomous(
             crate::autonomous::spawn_tactic_search_for_sorrys(tx_bfs, &session, &store_bfs);
         })
         .await;
-        // Drain all events from the search.
-        drain_until_settled(tx.clone(), store.clone(), &mut state, &mut rx).await;
-        // Check if solved.
-        let session = state.current_session().cloned().unwrap();
-        let all_verified = !session.proof.nodes.is_empty()
-            && session.proof.nodes.iter().all(|n| {
-                n.status == openproof_protocol::ProofNodeStatus::Verified
-                    && !source_contains_sorry_check(&n.content)
-            });
-        if all_verified {
+        // Drain events and check for TacticSearchComplete with solved=true.
+        let mut bfs_solved = false;
+        while let Ok(event) = rx.try_recv() {
+            match &event {
+                AppEvent::TacticSearchComplete {
+                    solved, tactics, ..
+                } => {
+                    if *solved {
+                        bfs_solved = true;
+                        eprintln!("[run] BFS SOLVED! Tactics: {}", tactics.join("; "));
+                        // Mark the node as verified.
+                        if let Some(s) = state.current_session_mut() {
+                            if let Some(n) = s.proof.nodes.first_mut() {
+                                n.status = openproof_protocol::ProofNodeStatus::Verified;
+                            }
+                            s.proof.phase = "done".to_string();
+                        }
+                    }
+                }
+                _ => {}
+            }
+            let _ = state.apply(event);
+        }
+        if bfs_solved {
             eprintln!("[run] All proof nodes verified via BFS!");
         } else {
             eprintln!("[run] BFS tactic search did not fully solve the proof.");

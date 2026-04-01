@@ -1,11 +1,11 @@
 import Mathlib
 
--- openproof: aime_1983_p2 :: (x p : ℝ)   (f : ℝ → ℝ)   (h₀ : 0 < p ∧ p < 15)   (h₁ : p ≤ x ∧ x ≤ 15)   (h₂ : f x = abs (x - p) + abs (x - 15) + abs (x - p - 15)) :   15 ≤ f x
+set_option maxHeartbeats 0
 
-theorem aime_1983_p2
-  (x p : ℝ)
-  (f : ℝ → ℝ)
-  (h₀ : 0 < p ∧ p < 15)
-  (h₁ : p ≤ x ∧ x ≤ 15)
-  (h₂ : f x = abs (x - p) + abs (x - 15) + abs (x - p - 15)) :
-  15 ≤ f x := by sorry
+open BigOperators Real Nat Topology Rat
+
+theorem mathd_algebra_142
+  (m b : ℝ)
+  (h₀ : m * 7 + b = -1)
+  (h₁ : m * (-1) + b = 7) :
+  m + b = 5 := by sorry

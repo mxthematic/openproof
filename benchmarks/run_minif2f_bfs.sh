@@ -51,7 +51,8 @@ for PROBLEM_FILE in $PROBLEMS; do
     LOG="$RESULTS_DIR/${PROBLEM_NAME}.log"
 
     # Run with BFS strategy and pass the raw Lean file content as the problem.
-    OPENPROOF_SEARCH_STRATEGY=bfs timeout "$TIMEOUT" cargo run -q -- run --problem "$LEAN_CONTENT" > "$LOG" 2>&1 || true
+    OPENPROOF_SEARCH_STRATEGY=bfs OPENPROOF_TACTIC_PROPOSER="${OPENPROOF_TACTIC_PROPOSER:-standard}" \
+      timeout "$TIMEOUT" cargo run -q -- run --problem "$LEAN_CONTENT" > "$LOG" 2>&1 || true
     END_TIME=$(date +%s)
     ELAPSED=$((END_TIME - START_TIME))
 

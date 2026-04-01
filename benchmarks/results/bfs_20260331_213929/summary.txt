@@ -1,0 +1,11 @@
+FAILED 213 mathd_algebra_107
+FAILED 279 mathd_algebra_113
+FAILED 249 mathd_algebra_114
+FAILED 204 mathd_algebra_125
+FAILED 255 mathd_algebra_129
+TIMEOUT 300 mathd_algebra_137
+FAILED 284 mathd_algebra_139
+FAILED 282 mathd_algebra_141
+FAILED 144 mathd_algebra_142
+FAILED 73 mathd_algebra_143
+FAILED 195 mathd_algebra_148
