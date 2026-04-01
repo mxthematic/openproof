@@ -172,75 +172,103 @@ pub async fn run_autonomous(
             let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
         }
 
-        let session = state.current_session().cloned().unwrap();
-        let messages = build_turn_messages_with_retrieval(&store, Some(&session)).await;
-        eprintln!("[run] Running initial agentic turn (with tools: lean_verify, file_write, corpus_search, etc.)...");
-        let _ = state.apply(AppEvent::TurnStarted);
+        // Fast-path for pure BFS: if the problem IS valid Lean (has import + sorry),
+        // write it directly as Scratch.lean and skip the LLM turn entirely.
+        let is_bfs_only = state
+            .current_session()
+            .map(|s| s.proof.search_strategy == openproof_protocol::SearchStrategy::TacticSearch)
+            .unwrap_or(false);
+        let is_lean_source = problem.contains("import ") && problem.contains("sorry");
 
-        // Spawn Pantograph for fast tactic testing (~18s Mathlib import, then 3ms/tactic)
-        let project_dir = crate::helpers::resolve_lean_project_dir();
-        let prover: Option<openproof_lean::proof_tree::SharedProver> =
-            openproof_lean::proof_tree::SessionProver::spawn(&project_dir)
-                .map(|sp| {
-                    eprintln!("[run] Pantograph ready (Mathlib loaded)");
-                    std::sync::Arc::new(std::sync::Mutex::new(sp))
-                })
-                .map_err(|e| eprintln!("[run] Pantograph not available: {e}"))
-                .ok();
-
-        run_agentic_loop(
-            tx.clone(),
-            store.clone(),
-            &session.id,
-            messages,
-            &session,
-            prover.clone(),
-        )
-        .await;
-
-        // Drain events produced by the agentic loop
-        while let Ok(event) = rx.try_recv() {
-            match &event {
-                AppEvent::AppendAssistant(text) => {
-                    eprintln!(
-                        "[run] Assistant ({} chars, {} lines)",
-                        text.len(),
-                        text.lines().count()
-                    );
-                    for line in text.lines().take(15) {
-                        eprintln!("  | {line}");
-                    }
+        if is_bfs_only && is_lean_source {
+            eprintln!("[run] Pure BFS mode: writing Lean source directly (skipping LLM)");
+            let session_id = state.current_session().map(|s| s.id.clone()).unwrap();
+            let _ = store.write_workspace_file(&session_id, "Scratch.lean", &problem);
+            if let Some(session) = state.current_session_mut() {
+                if session.proof.nodes.is_empty() {
+                    session.proof.nodes.push(openproof_protocol::ProofNode {
+                        id: "root".to_string(),
+                        content: problem.clone(),
+                        status: openproof_protocol::ProofNodeStatus::Pending,
+                        ..Default::default()
+                    });
+                    session.proof.active_node_id = Some("root".to_string());
+                } else if let Some(node) = session.proof.nodes.first_mut() {
+                    node.content = problem.clone();
                 }
-                AppEvent::AppendNotice { title, content } => {
-                    eprintln!(
-                        "[run] {title}: {}",
-                        content.chars().take(200).collect::<String>()
-                    );
-                }
-                AppEvent::ToolCallReceived { tool_name, .. } => {
-                    eprintln!("[run] TOOL: {tool_name}");
-                }
-                AppEvent::ToolResultReceived {
-                    tool_name,
-                    success,
-                    output,
-                    ..
-                } => {
-                    eprintln!(
-                        "[run] RESULT: {tool_name} -> {} ({})",
-                        if *success { "ok" } else { "FAIL" },
-                        output.chars().take(100).collect::<String>()
-                    );
-                }
-                _ => {}
+                session.proof.scratch_path = Some("Scratch.lean".to_string());
             }
-            let _ = state.apply(event);
-        }
-        let _ = state.apply(AppEvent::TurnFinished);
-        if let Some(session) = state.current_session().cloned() {
-            let s = store.clone();
-            let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
-        }
+        } else {
+            let session = state.current_session().cloned().unwrap();
+            let messages = build_turn_messages_with_retrieval(&store, Some(&session)).await;
+            eprintln!("[run] Running initial agentic turn (with tools: lean_verify, file_write, corpus_search, etc.)...");
+            let _ = state.apply(AppEvent::TurnStarted);
+
+            // Spawn Pantograph for fast tactic testing (~18s Mathlib import, then 3ms/tactic)
+            let project_dir = crate::helpers::resolve_lean_project_dir();
+            let prover: Option<openproof_lean::proof_tree::SharedProver> =
+                openproof_lean::proof_tree::SessionProver::spawn(&project_dir)
+                    .map(|sp| {
+                        eprintln!("[run] Pantograph ready (Mathlib loaded)");
+                        std::sync::Arc::new(std::sync::Mutex::new(sp))
+                    })
+                    .map_err(|e| eprintln!("[run] Pantograph not available: {e}"))
+                    .ok();
+
+            run_agentic_loop(
+                tx.clone(),
+                store.clone(),
+                &session.id,
+                messages,
+                &session,
+                prover.clone(),
+            )
+            .await;
+
+            // Drain events produced by the agentic loop
+            while let Ok(event) = rx.try_recv() {
+                match &event {
+                    AppEvent::AppendAssistant(text) => {
+                        eprintln!(
+                            "[run] Assistant ({} chars, {} lines)",
+                            text.len(),
+                            text.lines().count()
+                        );
+                        for line in text.lines().take(15) {
+                            eprintln!("  | {line}");
+                        }
+                    }
+                    AppEvent::AppendNotice { title, content } => {
+                        eprintln!(
+                            "[run] {title}: {}",
+                            content.chars().take(200).collect::<String>()
+                        );
+                    }
+                    AppEvent::ToolCallReceived { tool_name, .. } => {
+                        eprintln!("[run] TOOL: {tool_name}");
+                    }
+                    AppEvent::ToolResultReceived {
+                        tool_name,
+                        success,
+                        output,
+                        ..
+                    } => {
+                        eprintln!(
+                            "[run] RESULT: {tool_name} -> {} ({})",
+                            if *success { "ok" } else { "FAIL" },
+                            output.chars().take(100).collect::<String>()
+                        );
+                    }
+                    _ => {}
+                }
+                let _ = state.apply(event);
+            }
+            let _ = state.apply(AppEvent::TurnFinished);
+            if let Some(session) = state.current_session().cloned() {
+                let s = store.clone();
+                let _ = tokio::task::spawn_blocking(move || s.save_session(&session)).await;
+            }
+        } // end else (agentic turn)
     }
 
     // Report extracted state

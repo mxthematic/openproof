@@ -201,6 +201,14 @@ pub fn verify_scratch_via_lsp(
             || msg.contains("has sorry")
     });
 
+    // Safety check: if the source contains "sorry" but no sorry diagnostic was
+    // returned, the LSP likely returned stale/empty results. Bail out so the
+    // caller falls through to the compiler which is authoritative.
+    let source_has_sorry = rendered_scratch.contains("sorry");
+    if source_has_sorry && !has_sorry && diagnostics.items.is_empty() {
+        anyhow::bail!("LSP returned empty diagnostics for file containing sorry");
+    }
+
     let stderr = if !errors.is_empty() || !warnings.is_empty() {
         [errors, warnings].concat().join("\n")
     } else {
