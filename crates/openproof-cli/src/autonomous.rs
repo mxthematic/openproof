@@ -2031,7 +2031,10 @@ pub fn spawn_tactic_search_for_sorrys(
                     }
                     TacticProposerBackend::Mlx => {
                         if let Some(ref proposer) = mlx {
-                            if let Ok(model_tactics) = proposer.propose_tactics(goal, k) {
+                            // Cap model proposals to minimize slow HTTP round-trips.
+                            // Each call takes ~1-2s. Standard tactics fill remaining slots.
+                            let model_k = k.min(2);
+                            if let Ok(model_tactics) = proposer.propose_tactics(goal, model_k) {
                                 candidates.extend(model_tactics);
                             }
                         }
